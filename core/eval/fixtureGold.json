@@ -1,0 +1,126 @@
+{
+  "note": "A frozen mini-repo with questions whose answers were checked by hand, plus add/change/remove scenarios for freshness. Positive queries expect the listed paths in the top k; an empty list means the answer must be empty.",
+  "files": {
+    "src/auth/login.js": "/**\n * Login handler for the OAuth2 authorization code flow.\n */\nimport { saveToken } from './tokenStore.js';\nexport async function handleLogin(request) { return saveToken(request.code); }\n",
+    "src/auth/tokenStore.js": "/**\n * Stores and refreshes access tokens.\n */\nexport function saveToken(code) { return { token: code }; }\nexport function refreshToken(token) { return token; }\n",
+    "src/user/userModel.js": "/**\n * User model with email and password hash.\n */\nexport class UserModel { constructor(id, email) { this.id = id; this.email = email; } }\n",
+    "src/api/router.js": "/**\n * HTTP router that wires endpoints to handlers.\n */\nimport { handleLogin } from '../auth/login.js';\nexport const routes = { '/login': handleLogin };\n",
+    "src/api/middleware/rateLimit.js": "/**\n * Rate limiting middleware: limits requests per client per minute.\n */\nexport function rateLimit(limit) { return (req, res, next) => next(); }\n",
+    "src/config/settings.js": "/**\n * Application settings loaded from environment variables.\n */\nexport const settings = { port: 3000 };\n",
+    "src/queue/jobQueue.js": "/**\n * Job queue with retry of failed jobs and exponential backoff.\n */\nexport class JobQueue { enqueue(job) {} retryFailed() {} }\n",
+    "src/queue/worker.js": "/**\n * Worker that pulls jobs from the job queue.\n */\nimport { JobQueue } from './jobQueue.js';\nexport function startWorker(queue = new JobQueue()) { return queue; }\n",
+    "src/billing/invoice.js": "/**\n * Invoice totals per customer, including VAT.\n */\nexport function invoiceTotal(lines) { return lines.reduce((s, l) => s + l.amount, 0); }\n",
+    "bin/cli.js": "/**\n * Command line entry point with subcommand handlers.\n */\nexport const commandHandlers = [{ match: (i) => i === 'status', handler: () => 'ok' }];\n",
+    "test/auth/login.test.js": "import { handleLogin } from '../../src/auth/login.js';\ntest('login', () => handleLogin({ code: 'x' }));\n",
+    "test/queue/jobQueue.test.js": "import { JobQueue } from '../../src/queue/jobQueue.js';\ntest('queue', () => new JobQueue());\n",
+    "src/report/salesSummary.js": "/**\n * Sales summary.\n */\nexport function buildSalesSummary(rows) { return rows.length; }\n",
+    "test/report/salesSummary.test.js": "/**\n * Tests the monthly sales summary report.\n */\nimport { buildSalesSummary } from '../../src/report/salesSummary.js';\ntest('report', () => buildSalesSummary([]));\n"
+  },
+  "queries": [
+    {
+      "id": "fx-login-en",
+      "query": "Add an OAuth2 login endpoint",
+      "expected": [
+        "src/auth/login.js"
+      ]
+    },
+    {
+      "id": "fx-token-en",
+      "query": "refresh expired access tokens",
+      "expected": [
+        "src/auth/tokenStore.js"
+      ]
+    },
+    {
+      "id": "fx-ratelimit-nl",
+      "query": "Voeg rate limiting toe aan de API middleware",
+      "expected": [
+        "src/api/middleware/rateLimit.js"
+      ]
+    },
+    {
+      "id": "fx-queue-en",
+      "query": "retry failed jobs with backoff",
+      "expected": [
+        "src/queue/jobQueue.js"
+      ]
+    },
+    {
+      "id": "fx-invoice-en",
+      "query": "invoice totals including VAT per customer",
+      "expected": [
+        "src/billing/invoice.js"
+      ]
+    },
+    {
+      "id": "fx-cli-nl",
+      "query": "voeg een status commando toe aan de CLI",
+      "expected": [
+        "bin/cli.js"
+      ]
+    },
+    {
+      "id": "fx-tests-en",
+      "query": "where are the tests for login",
+      "expected": [
+        "test/auth/login.test.js"
+      ]
+    },
+    {
+      "id": "fx-negative-en",
+      "query": "quantum entanglement spectrometer calibration",
+      "expected": []
+    },
+    {
+      "id": "fx-negative-nl",
+      "query": "de een het voor zonder",
+      "expected": []
+    },
+    {
+      "id": "fx-source-before-test",
+      "query": "monthly sales summary report",
+      "expected": [
+        "src/report/salesSummary.js"
+      ],
+      "note": "23.8 (2026-10-29): a test that repeats the question must not outrank the module (test penalty -1 -> -3)"
+    }
+  ],
+  "freshness": [
+    {
+      "id": "fx-fresh-added",
+      "change": {
+        "write": {
+          "src/mail/mailer.js": "/**\n * Sends transactional email.\n */\nexport function sendMail() {}\n"
+        }
+      },
+      "query": "send transactional email",
+      "expectFound": [
+        "src/mail/mailer.js"
+      ]
+    },
+    {
+      "id": "fx-fresh-changed",
+      "change": {
+        "write": {
+          "src/billing/invoice.js": "/**\n * Credit note handling for refunds.\n */\nexport function creditNote() {}\n"
+        }
+      },
+      "query": "credit note refunds",
+      "expectFound": [
+        "src/billing/invoice.js"
+      ]
+    },
+    {
+      "id": "fx-fresh-removed",
+      "change": {
+        "remove": [
+          "src/user/userModel.js"
+        ]
+      },
+      "query": "user model email password hash",
+      "expectAbsent": [
+        "src/user/userModel.js"
+      ]
+    }
+  ]
+}

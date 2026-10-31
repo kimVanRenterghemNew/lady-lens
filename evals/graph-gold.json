@@ -1,0 +1,26 @@
+{
+  "note": "Questions about lady-lens itself, each answer chosen by hand on 2026-10-29 from the module's header comment (the file whose job the question names). Empty `expected` = the answer must be empty. The frozen fixture lives in core/eval/fixtureGold.json.",
+  "thresholds": { "recallAtK": 0.8, "mrr": 0.5, "negativesClean": 1, "freshness": 1, "k": 5 },
+  "queries": [
+    { "id": "ll-health", "tag": "subject", "query": "code health: untested exports, import cycles, hotspots", "expected": ["core/graph/query/codeHealth.js"] },
+    { "id": "ll-cochange", "tag": "subject", "query": "files that change together in git history", "expected": ["core/graph/sync/gitHistory.js"] },
+    { "id": "ll-functionview", "tag": "subject", "query": "function view with callers, tests and stories", "expected": ["core/graph/query/functionView.js"] },
+    { "id": "ll-rank", "tag": "subject", "query": "ranked text matching for graph_query", "expected": ["core/graph/query/graphRank.js"] },
+    { "id": "ll-decisions", "tag": "subject", "query": "decision nodes and superseded decisions", "expected": ["core/graph/model/decisions.js"] },
+    { "id": "ll-chunk", "tag": "subject", "query": "read a chunk of lines from a file", "expected": ["core/search/chunkReader.js"] },
+    { "id": "ll-grep", "tag": "subject", "query": "textual code search with grep and glob", "expected": ["core/search/grepSearch.js"] },
+    { "id": "ll-lexicon", "tag": "subject", "query": "Dutch to English domain lexicon", "expected": ["core/language/lexicon.js"] },
+    { "id": "ll-fuzzy", "tag": "subject", "query": "typo tolerance for misspelled search terms", "expected": ["core/language/fuzzy.js"] },
+    { "id": "ll-settings", "tag": "subject", "query": "project settings and excluded directories", "expected": ["core/repository/projectSettings.js"] },
+    { "id": "ll-env", "tag": "subject", "query": "environment variables a host application maps to its own names", "expected": ["core/configuration/env.js"] },
+    { "id": "ll-store", "tag": "subject", "query": "Ladybug storage adapter graph store", "expected": ["core/graph/adapters/ladybug/ladybugGraphStore.js"] },
+    { "id": "ll-sync", "tag": "subject", "query": "project graph sync that fills the graph", "expected": ["core/graph/sync/graphSync.js"] },
+    { "id": "ll-scanner", "tag": "subject", "query": "walk graph roots and yield files eligible for indexing", "expected": ["core/repository/projectScanner.js"] },
+    { "id": "ll-ui", "tag": "subject", "query": "local search page in the browser", "expected": ["ui/graph-ui.mjs"] },
+    { "id": "ll-eval", "tag": "subject", "query": "graph eval recall and MRR over gold queries", "expected": ["core/eval/graphEval.js"] },
+    { "id": "ll-exact-createGraphSync", "tag": "exact-match", "query": "createGraphSync", "expected": ["core/graph/sync/graphSync.js"] },
+    { "id": "ll-exact-scoreAnswer", "tag": "exact-match", "query": "scoreAnswer", "expected": ["core/eval/searchBench.js"] },
+    { "id": "ll-negative-payment", "tag": "negative", "query": "stripe payment checkout invoice", "expected": [] },
+    { "id": "ll-negative-k8s", "tag": "negative", "query": "kubernetes helm chart deployment", "expected": [] }
+  ]
+}
