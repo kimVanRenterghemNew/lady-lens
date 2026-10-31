@@ -1,0 +1,12 @@
+node_modules/
+.memory/
+.lady-lens/
+*.lbdb
+*.lbdb.*
+dist/
+outputs/
+coverage/
+scratch/
+.env
+.env.*
+*.log

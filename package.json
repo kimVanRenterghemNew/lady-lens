@@ -1,0 +1,93 @@
+{
+  "name": "lady-lens",
+  "version": "1.0.0",
+  "description": "Kura's code graph for any JavaScript repository: definitions, imports, function view, decisions. Local, on Ladybug.",
+  "license": "GPL-3.0-or-later",
+  "author": "Kim Van Renterghem <kim.van.renterghem@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kimVanRenterghemNew/lady-lens.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kimVanRenterghemNew/lady-lens/issues"
+  },
+  "homepage": "https://github.com/kimVanRenterghemNew/lady-lens#readme",
+  "keywords": [
+    "code-graph",
+    "mcp",
+    "model-context-protocol",
+    "ladybugdb",
+    "ast",
+    "code-search",
+    "developer-tools",
+    "agentic-coding",
+    "graph-analysis"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./graph": "./core/graph/index.js",
+    "./search": "./core/search/index.js",
+    "./tools": "./core/search/index.js",
+    "./research": "./core/search/index.js",
+    "./ui": "./ui/graph-ui.mjs",
+    "./mcp": "./core/mcp/index.js",
+    "./repository": "./core/repository/index.js",
+    "./discussions": "./core/discussions/index.js",
+    "./observability": "./core/observability/index.js",
+    "./configuration": "./core/configuration/index.js",
+    "./package.json": "./package.json",
+    "./eval": "./core/eval/index.js"
+  },
+  "files": [
+    "index.js",
+    "core",
+    "bin",
+    "ui",
+    "README.md",
+    "DOCUMENTATIE.md",
+    "LICENSE"
+  ],
+  "bin": {
+    "lens": "bin/lens.mjs",
+    "lady-lens": "bin/lens.mjs"
+  },
+  "scripts": {
+    "start": "npm run mcp  -d",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint .",
+    "check": "npm run lint && npm run test:coverage",
+    "prepublishOnly": "npm run check",
+    "lint:report": "eslint . --format json --output-file outputs/lint/eslint.json",
+    "lens": "node bin/lens.mjs",
+    "mcp": "node bin/lens.mjs mcp",
+    "pack": "npm pack --pack-destination dist",
+    "eval:graph": "node evals/graphEval.mjs",
+    "bench": "node scripts/benchmark.mjs",
+    "test:perf": "vitest run test/performance.test.js"
+  },
+  "dependencies": {
+    "@ladybugdb/core": "^0.21.2",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "acorn": "^8.18.0",
+    "diff": "^9.0.0",
+    "dotenv": "^18.0.3",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.12.0",
+    "fast-check": "^4.10.2",
+    "globals": "^17.13.0",
+    "vitest": "^5.0.1"
+  },
+  "allowScripts": {
+    "@ladybugdb/core@0.21.2": true
+  }
+}

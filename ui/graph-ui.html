@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lady-lens</title>
+<link rel="stylesheet" href="/graph-ui.css">
+<script src="https://unpkg.com/cytoscape@3/dist/cytoscape.min.js"></script>
+</head>
+<body>
+<header>
+  <div class="brand">lady-lens <span id="repo"></span></div>
+  <nav class="nav-tabs">
+    <button class="tab-btn active" data-tab="search">Search & Explorer</button>
+    <button class="tab-btn" data-tab="health">Architecture & Health</button>
+    <button class="tab-btn" data-tab="graph">Graph Network</button>
+  </nav>
+</header>
+
+<main style="flex:1;min-height:0;display:flex;position:relative;">
+  <lens-search id="view-search" class="tab-pane active">
+    <div class="search-sidebar">
+      <form id="f" class="search-bar">
+        <div class="input-row">
+          <select id="tool"><option value="searchView">Zoeken (searchView)</option><option value="auto">Automatisch</option><option value="functionView">Functie View</option><option value="definedIn">Gedefinieerd In</option><option value="importedBy">Geïmporteerd Door</option><option value="imports">Importeert</option><option value="exports">Exports</option><option value="graph_query">Onderwerp</option><option value="grep">Tekst (grep)</option></select>
+          <button type="submit" class="primary">Zoek</button>
+        </div>
+        <div class="search-options" style="display:flex;gap:6px;align-items:center;font-size:11px;margin-top:6px;">
+          <label title="Hoofdlettergevoelig"><input type="checkbox" id="opt-case"> Aa</label>
+          <label title="Heel woord"><input type="checkbox" id="opt-word"> \b</label>
+          <label title="Reguliere expressie"><input type="checkbox" id="opt-regex"> .*</label>
+          <select id="opt-kind" style="font-size:11px;padding:2px 4px;"><option value="all">Alles</option><option value="code">Code</option><option value="doc">Docs</option><option value="test">Tests</option></select>
+          <input id="opt-inc" type="text" placeholder="filter (bv. *.cs)" style="flex:1;font-size:11px;padding:2px 4px;">
+        </div>
+        <input id="q" type="search" placeholder="symbool, bestand of trefwoord" autofocus>
+      </form>
+      <div id="out" class="results-pane"><p class="muted">Zoek naar code-elementen of switch naar Health & Graph.</p></div>
+    </div>
+    <div id="code-view" class="code-preview"><p class="muted">Selecteer een symbool of regel om code te inspecteren.</p></div>
+  </lens-search>
+
+  <lens-health id="view-health" class="tab-pane">
+    <div id="health-content" style="width:100%;display:flex;flex-direction:column;gap:18px;">
+      <div id="health-stats" class="stat-banner"></div>
+      <div id="health-pain"></div>
+      <div class="health-grid">
+        <div class="card">
+          <h3>Top 5 Centrale Knopen (Spilarchitectuur)</h3>
+          <div id="health-central-table">Laden…</div>
+        </div>
+        <div class="card">
+          <h3>Complexe Functies (CC &gt; 15 of LOC &gt; 60)</h3>
+          <div id="health-complex-table">Laden…</div>
+        </div>
+      </div>
+    </div>
+  </lens-health>
+
+  <lens-graph id="view-graph" class="tab-pane">
+    <div id="cy"></div>
+    <div id="legend" class="graph-legend"></div>
+    <div class="graph-toolbar">
+      <button id="clear">Leeg</button>
+      <button id="fit">Passend</button>
+    </div>
+    <div id="hint" class="graph-status">Laden…</div>
+  </lens-graph>
+</main>
+
+<script>
+const TYPES = { Function: { color:'#9b59b6', label:'Function' }, Code: { color:'#3498db', label:'Code' }, Test: { color:'#2ecc71', label:'Test' }, Doc: { color:'#e67e22', label:'Doc' }, Script: { color:'#1abc9c', label:'Script' }, Config: { color:'#f1c40f', label:'Config' } };
+const typeOf = (p, k) => k === 'test' ? 'Test' : k === 'doc' || /\.md$/.test(p) ? 'Doc' : k === 'script' ? 'Script' : k === 'config' ? 'Config' : /^configs\/|\.(ya?ml|json)$/.test(p) ? 'Config' : 'Code';
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const ask = (tool, args) => fetch('/api/ask?tool=' + tool + '&args=' + encodeURIComponent(JSON.stringify(args))).then(r => r.json());
+let cy, overview, byPath = new Map(), out = new Map(), into = new Map();
+
+const define = (tag, { wire, load }) => customElements.define(tag, class extends HTMLElement {
+  connectedCallback() { if (this.wired) return; this.wired = true; wire?.call(this); }
+  load() { return load ? load.call(this) : Promise.resolve(); }
+});
+
+define('lens-search', {
+  wire() {
+    $('#f').onsubmit = e => { e.preventDefault(); doSearch($('#q').value.trim(), $('#tool').value); };
+  }
+});
+
+define('lens-health', {
+  async load() {
+    const h = await fetch('/api/health').then(r => r.json()), s = h.summary || {}, pain = h.zoneOfPain || [], c = h.topCentralNodes || [], f = h.complexFunctions || [];
+    $('#health-stats').innerHTML = `<div class="stat-item"><span class="stat-val">${s.files || 0}</span><span class="stat-lbl">Bestanden</span></div><div class="stat-item"><span class="stat-val">${s.inCycles || 0}</span><span class="stat-lbl">In Cycli</span></div><div class="stat-item"><span class="stat-val">${s.untested || 0}</span><span class="stat-lbl">Ongestest</span></div><div class="stat-item"><span class="stat-val">${pain.length}</span><span class="stat-lbl">Zone of Pain</span></div><div class="stat-item"><span class="stat-val">${f.length}</span><span class="stat-lbl">Complexe Functies</span></div>`;
+    $('#health-pain').innerHTML = pain.length ? `<div class="pain-alert"><strong>Zone of Pain Hotspots (${pain.length}):</strong> ` + pain.map(p => `<code>${esc(p.path)}</code> (I=${p.instability})`).join(', ') + `</div>` : '';
+    $('#health-central-table').innerHTML = c.length ? `<table class="data-table"><thead><tr><th>Bestand</th><th>Centraliteit</th><th>Ca</th><th>Ce</th><th>Instabiliteit I</th></tr></thead><tbody>` + c.map(x => `<tr><td><code>${esc(x.path)}</code></td><td>${x.centralityScore}</td><td>${x.afferentCoupling}</td><td>${x.efferentCoupling}</td><td>${x.instability}</td></tr>`).join('') + `</tbody></table>` : '<p class="muted">Geen data</p>';
+    $('#health-complex-table').innerHTML = f.length ? `<table class="data-table"><thead><tr><th>Functie</th><th>Bestand</th><th>CC</th><th>Regels</th><th>Issues</th></tr></thead><tbody>` + f.slice(0, 15).map(x => `<tr><td><strong>${esc(x.name)}</strong></td><td><a class="ln-link" data-path="${esc(x.file)}" data-line="${x.loc[0]}">${esc(x.file)}:${x.loc[0]}</a></td><td><span class="badge ${x.cyclomaticComplexity > 15 ? 'danger' : 'warn'}">${x.cyclomaticComplexity}</span></td><td>${x.lines}</td><td>${(x.issues || []).map(i => `<span class="badge neutral">${esc(i)}</span>`).join(' ')}</td></tr>`).join('') + `</tbody></table>` : '<p class="muted">Geen complexe functies gevonden (CC &le; 15).</p>';
+  }
+});
+
+define('lens-graph', {
+  wire() { $('#clear').onclick = () => cy.elements().remove(); $('#fit').onclick = () => cy.fit(undefined, 30); },
+  load() { if (cy) setTimeout(() => { cy.resize(); cy.fit(undefined, 30); }, 50); }
+});
+
+document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('.tab-btn, .tab-pane').forEach(el => el.classList.remove('active'));
+  btn.classList.add('active');
+  const t = $(`#view-${btn.dataset.tab}`);
+  t.classList.add('active');
+  t.load?.();
+}));
+
+async function showCode(path, startLine, endLine) {
+  const r = await ask('read_chunk', startLine ? { path, startLine, endLine } : { path });
+  if (r.error) return $('#code-view').innerHTML = `<p class="muted">${esc(r.error)}</p>`;
+  const start = r.startLine || 1, lines = (typeof r.content === 'string' ? r.content : (r.outline || []).map(o => o.text || o.name).join('\n')).split('\n');
+  $('#code-view').innerHTML = `<h3 style="margin:0 0 10px;font-size:12px;">${esc(r.path)} (${start}-${r.endLine || start + lines.length})</h3><pre class="code">` + lines.map((l, i) => `<span class="ln">${start + i}</span>${esc(l)}`).join('\n') + `</pre>`;
+}
+
+function renderResults(tool, res) {
+  if (res.error) return `<p class="muted">${esc(res.error)}</p>`;
+  if (tool === 'searchView') {
+    if (!res.files?.length) return `<p class="muted">0 treffers voor "${esc(res.query)}"</p>`;
+    return `<p class="muted" style="margin-bottom:8px;">${res.totalMatches} treffers in ${res.filesCount} bestanden</p>` +
+      res.files.map(f => `<div class="file-group"><div class="file-hdr"><strong>${esc(f.file)}</strong> <span class="badge ${f.kind}">${f.kind}</span></div>` +
+        f.matches.map(m => `<div class="match-line"><a class="ln-link" data-path="${esc(f.file)}" data-line="${m.line}">${m.line}:</a> <code>${esc(m.text)}</code> <span class="badge ${m.kind}">${m.kind}</span>` +
+          (m.kind === 'definition' ? ` <button class="btn-usage" data-sym="${esc(m.symbol || res.query)}">Toon gebruik</button>` : '') +
+        `</div>`).join('') +
+      `</div>`).join('');
+  }
+  if (tool === 'functionView') {
+    return `<h3>${esc(res.symbol)}</h3>` + (res.definitions || []).map(d => `<div><a class="ln-link" data-path="${esc(d.path)}" data-line="${d.startLine}">${esc(d.path)}:${d.startLine}</a> <span class="muted">${esc(d.purpose || '')}</span></div>`).join('') +
+      `<p class="muted" style="margin-top:8px;">Aanroepers: ${(res.callers || []).length} · Tests: ${(res.tests || []).length}</p>`;
+  }
+  if (tool === 'definedIn') return (res.locations || []).map(l => `<div><a class="ln-link" data-path="${esc(l.path)}" data-line="${l.startLine}">${esc(l.path)}:${l.startLine}</a></div>`).join('') || '<p class="muted">Niet gevonden</p>';
+  if (tool === 'grep') return `<p class="muted">${(res.matches || []).length} treffers</p>` + (res.matches || []).slice(0, 30).map(m => `<div><a class="ln-link" data-path="${esc(m.file)}" data-line="${m.line}">${esc(m.file)}:${m.line}</a> <code>${esc(m.text)}</code></div>`).join('');
+  return `<pre style="font-size:11px;">${esc(JSON.stringify(res, null, 2))}</pre>`;
+}
+
+async function doSearch(q, tool) {
+  $('#out').innerHTML = '<p class="muted">Zoeken…</p>';
+  if (tool === 'searchView') {
+    const res = await ask('searchView', { query: q, caseSensitive: $('#opt-case')?.checked, wholeWord: $('#opt-word')?.checked, isRegex: $('#opt-regex')?.checked, kind: $('#opt-kind')?.value, include: $('#opt-inc')?.value });
+    $('#out').innerHTML = renderResults('searchView', res);
+    const m = res.files?.[0]?.matches?.[0];
+    if (m) showCode(res.files[0].file, Math.max(1, m.line - 5), m.line + 30);
+    return;
+  }
+  let t = tool === 'auto' ? (/^[A-Za-z_$][\w$]*$/.test(q) && /[a-z][A-Z]|_/.test(q) ? 'functionView' : 'grep') : tool;
+  const args = ['functionView', 'definedIn'].includes(t) ? { symbol: q } : t === 'grep' ? { pattern: q } : ['importedBy', 'imports', 'exports'].includes(t) ? { file: q } : { query: q };
+  let res = await ask(t, args);
+  if (tool === 'auto' && t === 'functionView' && !res.definitions?.length) { t = 'grep'; res = await ask('grep', { pattern: q }); }
+  $('#out').innerHTML = renderResults(t, res);
+  if (t === 'functionView' && res.definitions?.length) showCode(res.definitions[0].path, res.definitions[0].startLine, res.definitions[0].endLine);
+}
+
+document.addEventListener('click', async e => {
+  const btn = e.target.closest('.btn-usage');
+  if (btn) {
+    const fv = await ask('functionView', { symbol: btn.dataset.sym });
+    $('#out').innerHTML = renderResults('functionView', fv);
+    if (fv.definitions?.length) showCode(fv.definitions[0].path, fv.definitions[0].startLine, fv.definitions[0].endLine);
+    return;
+  }
+  const ln = e.target.closest('.ln-link');
+  if (ln) showCode(ln.dataset.path, Math.max(1, Number(ln.dataset.line) - 5), Number(ln.dataset.line) + 30);
+});
+
+async function boot() {
+  fetch('/api/repo').then(r => r.json()).then(({ repo }) => { if (repo) { $('#repo').textContent = repo; document.title = `lady-lens: ${repo.split(/[\\/]/).pop()}`; } }).catch(() => {});
+  overview = await fetch('/api/overview').then(r => r.json());
+  for (const n of overview.nodes) byPath.set(n.path, n);
+  const pathOf = new Map(overview.nodes.map(n => [n.id, n.path]));
+  for (const e of overview.edges) {
+    const from = pathOf.get(e.from), to = pathOf.get(e.to);
+    (out.get(from) || out.set(from, []).get(from)).push({ to, type: e.type });
+    (into.get(to) || into.set(to, []).get(to)).push({ from, type: e.type });
+  }
+  cy = cytoscape({ container: $('#cy'), wheelSensitivity: 0.25, style: [
+    { selector: 'node', style: { 'background-color': 'data(color)', width: 44, height: 44, label: 'data(label)', color: '#fff', 'font-size': 8, 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'ellipsis', 'text-max-width': 40, 'border-width': 2, 'border-color': '#0002' } },
+    { selector: 'node[ring]', style: { 'border-color': 'data(ring)', 'border-width': 'data(ringWidth)' } },
+    { selector: 'edge', style: { width: 1.2, 'line-color': '#94948c', 'target-arrow-color': '#94948c', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'font-size': 6 } }
+  ] });
+  for (const n of overview.nodes.slice(0, 100)) {
+    const t = typeOf(n.path, n.kind);
+    const iss = n.issues || [];
+    cy.add({ data: { id: n.id, label: n.path.split('/').pop(), color: TYPES[t].color, ring: iss.length ? (iss.length > 1 ? '#e5534b' : '#f0a020') : '#0002', ringWidth: iss.length ? 4 : 2 } });
+  }
+  for (const e of overview.edges.filter(e => cy.getElementById(e.from).length && cy.getElementById(e.to).length)) {
+    cy.add({ data: { id: `${e.from}|${e.type}|${e.to}`, source: e.from, target: e.to } });
+  }
+  cy.layout({ name: 'cose', animate: false, padding: 30 }).run();
+  $('#hint').textContent = `${cy.nodes().length} knopen in beeld · ${overview.nodes.length} totaal`;
+}
+boot().catch(err => { $('#hint').textContent = 'Graph laden mislukt: ' + err.message; });
+</script>
+</body>
+</html>
