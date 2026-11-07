@@ -72,6 +72,7 @@ export function grep(args = {}, { root = REPO_ROOT } = {}) {
             if (!accept(rel)) return;
             let text;
             try { text = fs.readFileSync(file, 'utf8'); } catch { return; }
+            if (text.includes('\0')) return; // binary (a Mendix .mpr, mxcli's catalog.db): its text is in readable files
             const lines = text.split('\n');
             if (firstPerFile) {
                 const i = lines.findIndex(line => regex.test(line));

@@ -74,3 +74,34 @@ describe('functionView', () => {
         expect(functionView(fixture(), 'doesNotExist', { readFile })).toMatchObject({ found: false, definitions: [], callers: [], tests: [] });
     });
 });
+
+describe('functionView: classes in other languages, given facts and unreadable files', () => {
+    const CS = 'public class Base\n{\n    public int A() { return 1; }\n}\n';
+    const SUB = 'public class Sub : Base\n{\n}\n';
+    function classGraph({ functions } = {}) {
+        const graph = createGraph('cs');
+        graph.addNode('file:src/Base.cs', 'CodeFile', { path: 'src/Base.cs', exports: ['Base'], symbolRanges: { Base: [1, 4] }, ...(functions ? { functions, calls: [] } : {}) });
+        graph.addNode('file:src/Sub.cs', 'CodeFile', { path: 'src/Sub.cs' });
+        graph.addNode('file:src/Gone.cs', 'CodeFile', { path: 'src/Gone.cs' });
+        graph.addNode('pathless', 'CodeFile', { calls: [['x', 'Base', 1]] });
+        graph.addEdge('file:src/Sub.cs', 'file:src/Base.cs', 'IMPORTS', 1);
+        graph.addEdge('file:src/Gone.cs', 'file:src/Base.cs', 'IMPORTS', 1);
+        return graph;
+    }
+    const read = path => ({ 'src/Base.cs': CS, 'src/Sub.cs': SUB })[path] ?? null;
+
+    it('a C# subclass (`: Base`) is an inheritor; an unreadable user and a node without path are skipped; a bad maxSites is the default', () => {
+        const view = functionView(classGraph(), 'Base', { readFile: read, maxSites: 'x' });
+        expect(view.inheritors).toEqual([{ name: 'Sub', path: 'src/Sub.cs', line: 1 }]);
+        expect(view.unresolved).toBeGreaterThanOrEqual(1);
+    });
+
+    it('methods come from the functions the graph already has, without parsing the file again', () => {
+        const view = functionView(classGraph({ functions: [{ name: 'A', loc: [3, 3] }, { name: 'Elsewhere', loc: [9, 9] }] }), 'Base', { readFile: read });
+        expect(view.children).toEqual([{ name: 'A', path: 'src/Base.cs', line: 3 }]);
+    });
+
+    it('a definition file that cannot be read has no children', () => {
+        expect(functionView(classGraph(), 'Base', { readFile: () => null }).children).toBeUndefined();
+    });
+});

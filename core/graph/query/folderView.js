@@ -38,12 +38,13 @@ export function reexportedPackage(source) {
 export function folderView(graph, folder, { readFile = () => null } = {}) {
     const dir = String(folder ?? '').trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+$/, '');
     const all = [...graph.nodes.values()].filter(node => node.type === 'CodeFile' && typeof node.path === 'string');
-    const inside = all.filter(node => node.path.startsWith(`${dir}/`) && !isTest(node));
-    if (!dir || !inside.length) return { folder: dir, found: false };
+    const prefix = dir ? `${dir}/` : ''; // the root ("") is a folder too: a package whose main is its root index.js
+    const inside = all.filter(node => node.path.startsWith(prefix) && !isTest(node));
+    if (!inside.length) return { folder: dir, found: false };
     const byPath = new Map(all.map(node => [node.path, node]));
     const idToPath = new Map([...graph.nodes.values()].map(node => [node.id, node.path]));
     const partOf = (path) => {
-        const rest = path.slice(dir.length + 1);
+        const rest = path.slice(prefix.length);
         return rest.includes('/') ? `${rest.split('/')[0]}/` : rest;
     };
 
@@ -51,7 +52,7 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
     const usedCount = new Map();
     for (const edge of graph.edges) {
         const from = idToPath.get(edge.from), to = idToPath.get(edge.to);
-        if (to && from && (edge.type === 'IMPORTS' || edge.type === 'CALLS') && to.startsWith(`${dir}/`) && (!from.startsWith(`${dir}/`) || partOf(from) !== partOf(to))) {
+        if (to && from && (edge.type === 'IMPORTS' || edge.type === 'CALLS') && to.startsWith(prefix) && (!from.startsWith(prefix) || partOf(from) !== partOf(to))) {
             usedCount.set(to, (usedCount.get(to) || 0) + 1);
         }
     }
@@ -62,14 +63,14 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
         (groups.get(part) ?? groups.set(part, []).get(part)).push(node);
     }
     const parts = [...groups.entries()].map(([part, nodes]) => {
-        const index = part.endsWith('/') ? byPath.get(`${dir}/${part}index.js`) : nodes[0];
+        const index = part.endsWith('/') ? byPath.get(`${prefix}${part}index.js`) : nodes[0];
         const ranked = [...nodes].sort((a, b) => (usedCount.get(b.path) || 0) - (usedCount.get(a.path) || 0) || a.path.localeCompare(b.path));
         // without a header on its index.js, a part speaks through its most used files (one file says too little about a folder)
         const speakers = index?.purpose ? [index] : ranked.filter(node => node.purpose && !node.path.endsWith('/index.js')).slice(0, MAX_SPEAKERS);
         const exports = Array.isArray(index?.exports) && index.exports.length ? index.exports : ranked.flatMap(node => node.exports ?? []);
         return {
             part, files: nodes.length, lines: nodes.reduce((sum, node) => sum + (Number(node.lines) || 0), 0),
-            roles: speakers.map(node => ({ file: node.path.slice(dir.length + 1 + (part.endsWith('/') ? part.length : 0)), purpose: node.purpose })),
+            roles: speakers.map(node => ({ file: node.path.slice(prefix.length + (part.endsWith('/') ? part.length : 0)), purpose: node.purpose })),
             exports: [...new Set(exports)].slice(0, MAX_EXPORTS), exportCount: new Set(exports).size
         };
     }).sort((a, b) => a.part.localeCompare(b.part));
@@ -79,7 +80,7 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
     for (const edge of graph.edges) {
         if (edge.type !== 'IMPORTS' && edge.type !== 'CALLS') continue;
         const from = idToPath.get(edge.from), to = idToPath.get(edge.to);
-        if (!from || !to || !from.startsWith(`${dir}/`) || !to.startsWith(`${dir}/`) || isTest(byPath.get(from) ?? {})) continue;
+        if (!from || !to || !from.startsWith(prefix) || !to.startsWith(prefix) || isTest(byPath.get(from) ?? {})) continue;
         const a = partOf(from), b = partOf(to);
         if (a === b || a === 'index.js' || b === 'index.js') continue;
         const key = `${a}|${b}`;
@@ -89,7 +90,7 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
     }
     const flow = [...arrows.values()].sort((x, y) => (y.imports + y.calls) - (x.imports + x.calls) || x.from.localeCompare(y.from)).slice(0, MAX_FLOW);
 
-    const entryNode = byPath.get(`${dir}/index.js`);
+    const entryNode = byPath.get(`${prefix}index.js`);
     const entry = entryNode ? {
         path: entryNode.path, exportCount: (entryNode.exports ?? []).length, exports: (entryNode.exports ?? []).slice(0, MAX_EXPORTS),
         purpose: entryNode.purpose ?? null, package: reexportedPackage(readFile(entryNode.path))
@@ -101,7 +102,7 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
     for (const edge of graph.edges) {
         if (edge.type !== 'IMPORTS' && edge.type !== 'TESTS') continue;
         const from = idToPath.get(edge.from), to = idToPath.get(edge.to);
-        if (!from || !to || !reach.has(to) || from.startsWith(`${dir}/`) || reach.has(from)) continue;
+        if (!from || !to || !reach.has(to) || from.startsWith(prefix) || reach.has(from)) continue;
         (isTest(byPath.get(from) ?? { path: from }) ? tests : users).add(from);
     }
     const byFolder = new Map();
@@ -114,7 +115,7 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
     for (const edge of graph.edges) {
         if (edge.type !== 'CALLS') continue;
         const from = idToPath.get(edge.from), to = idToPath.get(edge.to);
-        if (!from || !to || !to.startsWith(`${dir}/`) || from.startsWith(`${dir}/`) || isTest(byPath.get(from) ?? { path: from })) continue;
+        if (!from || !to || !to.startsWith(prefix) || from.startsWith(prefix) || isTest(byPath.get(from) ?? { path: from })) continue;
         callSites.set(from, (callSites.get(from) || 0) + (edge.strength ?? edge.weight ?? 1));
     }
     const pointersByTo = new Map();
@@ -143,7 +144,7 @@ export function folderView(graph, folder, { readFile = () => null } = {}) {
     // with the file they point at: where things of this kind are registered, also when the folder itself is unused
     const base = dir.split('/').pop().toLowerCase();
     const registeredAs = [...graph.nodes.values()]
-        .filter(node => !['CodeFile', 'Document', 'Config', 'Decision'].includes(node.type) && String(node.name ?? '').toLowerCase().split('.')[0] === base)
+        .filter(node => !['CodeFile', 'Document', 'Config', 'Decision'].includes(node.type) && String(node.name ?? '').toLowerCase().split('.')[0] === base && base)
         .map(node => ({ name: node.name, type: node.type, description: node.purpose ?? node.documentation ?? null,
             at: graph.edges.filter(edge => edge.from === node.id).map(edge => ({ relation: edge.type, path: idToPath.get(edge.to) })).filter(item => item.path) }))
         .sort((a, b) => a.name.localeCompare(b.name)).slice(0, MAX_REGISTRATIONS);

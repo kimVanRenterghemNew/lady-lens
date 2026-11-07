@@ -46,6 +46,13 @@ export function createGraphRepository({ databasePath, open, store } = {}) {
         /** path -> {id, type, kind, hash, metadata} for every project entity (the input for incremental sync). */
         projectFiles: () => backend.projectFiles(PROJECT_SCOPE),
 
+        /** Same as `projectFiles` / `applyProjectChanges`, for any scope (a branch indexed without checkout: `branch:<name>`). */
+        scopeFiles: (scope) => backend.projectFiles(scope),
+        async applyScopeChanges(scope, { upserts = [], removePaths = [], relations = [] } = {}) {
+            assertValidRelations(relations);
+            return backend.applyProjectChanges(scope, { upserts, removePaths, relations });
+        },
+
         /**
          * Apply one incremental project sync in a single open: remove deleted files, upsert changed
          * ones, then replace ALL project relations (they are derived from metadata, cheap to rebuild).

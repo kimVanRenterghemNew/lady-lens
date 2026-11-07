@@ -9,6 +9,7 @@ import path from 'path';
 import { imports, importedBy, interfacesForScope, grep, graph_query, RESEARCH_TOOLS, RESEARCH_TOOL_SCHEMAS } from '../core/search/index.js';
 import { createGraphRepository, createGraphSync } from '../core/graph/index.js';
 import { loadProjectSettings } from '../core/repository/index.js';
+import { configureLensRoot, REPO_ROOT } from '../core/configuration/index.js';
 
 const noRefresh = { refresh: async () => ({ checked: false }) };
 let root;
@@ -125,5 +126,48 @@ describe('interfacesForScope', () => {
     it('respects custom maxChars budget', async () => {
         const res = await interfacesForScope({ files: ['core/a.js'], maxChars: 50 }, noRefresh);
         expect(res.length).toBeLessThanOrEqual(150);
+    });
+});
+
+describe('Kura 2026-11-04: graph_query node mode answers like query mode (B1)', () => {
+    it('incoming without a type: imports before calls, the cut is said, and the start node has consequences and risks', async () => {
+        const result = await graph_query({ node: 'file:core/Hub.js', incoming: true, limit: 5 });
+        expect(result.edges.slice(0, 4).every(edge => edge.type === 'IMPORTS')).toBe(true);
+        expect(result).toMatchObject({ total: 17, truncated: true }); // 16 importers and the test
+        expect(result.hint).toContain('17 neighbours');
+        const start = result.nodes.find(node => node.path === 'core/hub.js');
+        expect(start.consequences).toMatchObject({ importedBy: 16 });
+        expect(Array.isArray(start.risks)).toBe(true);
+    });
+    it('a node without a direction still gets its consequences; an uncut answer says truncated: false', async () => {
+        expect((await graph_query({ node: 'file:core/hub.js' })).nodes[0].consequences).toMatchObject({ importedBy: 16 });
+        expect(await graph_query({ node: 'core/a.js', outgoing: true, limit: 50 })).toMatchObject({ total: 2, truncated: false });
+    });
+});
+
+describe('Kura 2026-11-04: a documentation question about a file (B3)', () => {
+    let previousRoot;
+    afterAll(() => configureLensRoot(previousRoot));
+    beforeAll(async () => {
+        previousRoot = REPO_ROOT;
+        configureLensRoot(root); // the document lines are read from the active repository
+        write('docs/router.md', '# Router\nThe router lives in core/hub.js and decides.\n');
+        write('docs/words.md', '# Hub words\nA hub is a central thing; hub hub hub.\n');
+        await createGraphSync({ root, repository: createGraphRepository(), settings: await loadProjectSettings() }).sync();
+    });
+    it('the documents that name the path come first, with the lines; a word match has no `mentions`', async () => {
+        const result = await graph_query({ query: 'core/hub.js', kind: 'doc', limit: 5 });
+        expect(result.nodes[0]).toMatchObject({ path: 'docs/router.md', mentions: 'path', lines: [2] });
+        expect(result.nodes.filter(node => node.mentions !== 'path').every(node => !String(node.path).includes('router'))).toBe(true);
+    });
+});
+
+describe('Kura 2026-11-04: tool schemas say who uses them and whether they write (B2)', () => {
+    it('the discussion tools are for /discuss and /research; save and edit write, the rest only reads', () => {
+        const discussion = RESEARCH_TOOL_SCHEMAS.filter(schema => schema.name.startsWith('discussion_'));
+        expect(discussion).toHaveLength(5);
+        expect(discussion.every(schema => schema.usedBy.join() === '/discuss,/research')).toBe(true);
+        expect(discussion.filter(schema => !schema.readOnly).map(schema => schema.name).sort()).toEqual(['discussion_edit', 'discussion_save']);
+        expect(RESEARCH_TOOL_SCHEMAS.find(schema => schema.name === 'grep').readOnly).toBe(true);
     });
 });

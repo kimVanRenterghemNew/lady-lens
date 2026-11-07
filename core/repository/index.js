@@ -1,4 +1,4 @@
-export { scanGraphFiles } from './projectScanner.js';
+export { scanGraphFiles, inGraphScope } from './projectScanner.js';
 export { loadProjectSettings, loadProjectSettingsSync, normalizeRelativePath, shouldExcludePath, isGraphExtension, createSearchExcluder } from './projectSettings.js';
 export {
     LENS_HOME,
@@ -10,6 +10,7 @@ export {
     listRegisteredRepos,
     registerRepo,
     unregisterRepo,
+    findRegisteredRepo,
     resolveRepoTarget,
     currentGitBranch
 } from './registry.js';

@@ -55,13 +55,18 @@ export const RESEARCH_TOOL_SCHEMAS = [
     },
     {
         name: 'health',
-        description: 'Code health: which files no test reaches (also through index.js), exports no test names, import cycles, imports past a module index.js, large files, fan-in/out, hotspots (churn x size). Worst first; per file, per module or the whole repo.',
-        parameters: { type: 'object', properties: { file: { type: 'string', description: 'Repo-relative file path' }, module: { type: 'string', description: 'Folder, e.g. core/graph' }, limit: { type: 'integer', description: 'Maximum number of files (default 20)' } } }
+        description: 'Code health: which files no test reaches (also through index.js), exports no test names, import cycles, imports past a module index.js, large files, fan-in/out, hotspots (churn x size); on request hubs and bridges. Worst first; per file, per module or the whole repo.',
+        parameters: { type: 'object', properties: { file: { type: 'string', description: 'Repo-relative file path' }, module: { type: 'string', description: 'Folder, e.g. core/graph' }, limit: { type: 'integer', description: 'Maximum number of files (default 20)' }, hubs: { type: 'boolean', description: 'true = also the files with the most neighbours (imports and calls)' }, bridges: { type: 'boolean', description: 'true = also the files on the most shortest paths between others (betweenness); slower on big repos' } } }
     },
     {
         name: 'functionView',
-        description: 'What does this function do, who calls it, which tests use it, which stories name it? Definition with lines and purpose, callers, tests (with test names), stories; only this function, not the whole file.',
-        parameters: { type: 'object', properties: { symbol: { type: 'string', description: 'The exact identifier' } }, required: ['symbol'] }
+        description: 'What does this function do, who calls it, which tests use it, which stories name it? Definition with lines and purpose, callers, tests (with test names), stories, bound (`resolved`) and unbound (`unresolved`) call counts; for a class also its methods (`children`) and subclasses (`inheritors`); only this function, not the whole file.',
+        parameters: { type: 'object', properties: { symbol: { type: 'string', description: 'The exact identifier' }, maxSites: { type: 'integer', description: 'Lines per caller, test and story (default 5, at most 200)' } }, required: ['symbol'] }
+    },
+    {
+        name: 'diff_impact',
+        description: 'What does my change touch? The functions a diff changes (default: the work not committed yet; or `from`..`to`, a branch from its merge-base) with per function its callers (file, lines), tests, bound and unbound call counts, complexity, and test gaps (changed functions no test names). Riskiest first.',
+        parameters: { type: 'object', properties: { from: { type: 'string', description: 'Start of a commit range or the base branch; leave out for the work not committed yet' }, to: { type: 'string', description: 'End of the range (default HEAD)' }, limit: { type: 'integer', description: 'Maximum number of functions (default 50)' } } }
     },
     {
         name: 'folderView',
@@ -97,7 +102,7 @@ export const RESEARCH_TOOL_SCHEMAS = [
     },
     {
         name: 'graph_query',
-        description: 'Query the current session code and decision graph by node or text context.',
+        description: 'Query the current session code and decision graph by node or text context. A code file node gets its consequences (importedBy, calledBy, tests) and risks in both modes; a one-hop answer lists imports before calls and says `total` and `truncated`. With kind "doc" and a file path, the documents that name the path come first (`mentions: "path"`, then "name"), each with the `lines` that name it.',
         parameters: {
             type: 'object',
             properties: {
@@ -114,4 +119,4 @@ export const RESEARCH_TOOL_SCHEMAS = [
             }
         }
     }
-];
+].map(schema => ({ readOnly: true, ...schema })); // research tools only read; a schema that writes says so itself

@@ -4,8 +4,10 @@ import os from 'os';
 import fs from 'fs';
 import { performance } from 'perf_hooks';
 import { createProfiler } from '../core/observability/index.js';
-import { createGraphSync, createGraphRepository, rankGraphNodes, codeHealth } from '../core/graph/index.js';
-import { loadGraphModel, definedInTool, exportsTool, fileExists } from '../core/search/index.js';
+import { createGraphSync, createGraphRepository, rankGraphNodes, codeHealth, hubsAndBridges } from '../core/graph/index.js';
+import { loadGraphModel, definedInTool, exportsTool, fileExists, diffImpact } from '../core/search/index.js';
+import { createFakeGit } from '../core/git/index.js';
+import { crossRepoSearch } from '../core/mcp/handlers/index.js';
 
 describe('Performance Diagnostics & Benchmarks', () => {
     let repo;
@@ -78,6 +80,33 @@ describe('Performance Diagnostics & Benchmarks', () => {
         const avgMs = (performance.now() - t0) / iterations;
         // Even before optimization it took ~200ms; with optimization it should be < 50ms
         expect(avgMs).toBeLessThan(250);
+    });
+
+    it('diff_impact for 10 changed functions, cross_repo_search over 3 projects and bridges stay within budget', async () => {
+        // compare.js has 10 functions; an empty HEAD version makes all of them changed
+        const file = 'core/branches/compare.js';
+        const git = createFakeGit({ commits: [{ name: 'c1', parents: [], files: { [file]: '' } }], branches: { main: 'c1' }, head: 'main', worktree: { [file]: fs.readFileSync(file, 'utf8') } });
+        const readFile = rel => { try { return fs.readFileSync(rel, 'utf8'); } catch { return null; } };
+        let t0 = performance.now();
+        const impact = await diffImpact({}, { refresh: async () => null, git, repository: repo, readFile });
+        const diffMs = performance.now() - t0;
+        expect(impact.total).toBeGreaterThanOrEqual(10);
+
+        const projects = ['core/branches', 'core/git', 'core/search'].map((dir, i) => ({ id: `p${i}`, path: path.resolve(dir) }));
+        t0 = performance.now();
+        const found = crossRepoSearch({ query: 'function', limit: 50 }, { list: () => projects, find: () => null });
+        const crossMs = performance.now() - t0;
+        expect(found.repos).toHaveLength(3);
+
+        t0 = performance.now();
+        const { bridges } = hubsAndBridges(loadedModel.graph, { bridges: true });
+        const bridgesMs = performance.now() - t0;
+        expect(bridges.total).toBeGreaterThan(0);
+        // first measurement 2026-11-04 on this repo: diff_impact 1.7-3.2 s alone and 9.3-11.6 s inside `npm run check` (coverage,
+        // parallel workers, machine at 100% CPU) for 13 functions, 85-345 ms per function view; cross_repo_search 14-19 ms, bridges 120-164 ms
+        expect(diffMs).toBeLessThan(15000);
+        expect(crossMs).toBeLessThan(500);
+        expect(bridgesMs).toBeLessThan(1000);
     });
 
     it('direct queries (definedIn, exports, exists) execute within budget', async () => {

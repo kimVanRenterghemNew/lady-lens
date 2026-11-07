@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Project graph sync: fills and maintains the project scope of the Ladybug graph.
  * Relations are derived data: every write rebuilds relations from entity metadata.
  * @module core/graph/graphSync
@@ -9,121 +9,30 @@ import path from 'path';
 import { REPO_ROOT, lensEnv } from '../../configuration/index.js';
 import { loadProjectSettings, scanGraphFiles } from '../../repository/index.js';
 import { createGraphRepository, PROJECT_SCOPE } from '../repository/index.js';
-import { resolveImportPath, resolveCallee } from '../model/index.js';
-import { debug } from '../../observability/index.js';
-import { DEFAULT_SCRIPT_PATHS } from './codeFacts.js';
 import { coChangeRelations } from './gitHistory.js';
-import { buildCodeEntity, buildConfigEntity, buildDocumentEntity, fileNodeId } from '../adapters/ladybug/index.js';
-import { deriveDocumentRelations } from './documentRelations.js';
+import { createGit } from '../../git/index.js';
+import { recordHead } from './headCommit.js';
+import { entityFor, entryPointsFrom, dependencyNodesOf } from './fileEntity.js';
+import { deriveProjectRelations } from './projectRelations.js';
 import { isCodeFile, isDocFile, isConfigFile } from './languages/index.js';
-
+import { mendixContributor } from './mendix.js';
+import { contributed } from './contributors.js';
 const toPosix = (value) => String(value).replace(/\\/g, '/');
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
-
-// Knowledge a host adds that the graph cannot read from files (e.g. its composition). Each contributor gets
-// `{ root, files }` at every write and returns `{ nodes, relations }`; a failing one is skipped (logged), the files still get written.
-let contributors = [];
-export function configureLensContributors(list = []) {
-    contributors = [...list];
-}
-
-async function contributed(root, files, stamp) {
-    const nodes = [];
-    const relations = [];
-    for (const contributor of contributors) {
-        try {
-            const result = await contributor({ root, files });
-            for (const node of result?.nodes || []) nodes.push({ scope: PROJECT_SCOPE, path: '', contentHash: '', metadata: {}, createdAt: stamp, updatedAt: stamp, observedAt: stamp, ...node });
-            for (const relation of result?.relations || []) relations.push({ confidence: 'EXTRACTED', createdAt: stamp, ...relation });
-        } catch (error) {
-            debug(1, 'graph:contributor', `a graph contributor failed and was skipped: ${error.message}`);
-        }
-    }
-    return { nodes, relations };
-}
-
 export function isProjectGraphEnabled(env = process.env) {
     return lensEnv('PROJECT_GRAPH', env) !== '0';
 }
-
 function isIndexable(file) {
     return isCodeFile(file) || isDocFile(file) || isConfigFile(file);
 }
-
-/** Files the package declares as entry points (`bin`, `main`): the CLI dispatcher is found by "cli"/"command". */
-function entryPointsOf(root) {
-    try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-        const bins = typeof pkg.bin === 'string' ? [pkg.bin] : Object.values(pkg.bin || {});
-        return new Set([...bins, pkg.main].filter(Boolean).map(entry => toPosix(entry).replace(/^\.\//, '')));
-    } catch {
-        return new Set();
-    }
-}
-
 /** Bumped when the facts of a file gain a field: every file is then re-read once, also when its content did not change. */
-export const FACTS_VERSION = 6;
-
-/** All project relations from the metadata of every (current) project file. Pure. */
-export function deriveProjectRelations(files, now = new Date().toISOString()) {
-    const codePaths = new Set([...files.entries()].filter(([, info]) => info.type === 'CodeFile').map(([file]) => file));
-    const configPaths = [...files.entries()].filter(([, info]) => info.type === 'Config').map(([file]) => file);
-    const docPaths = new Set([...files.entries()].filter(([, info]) => info.type === 'Document').map(([file]) => file));
-    const has = (file) => codePaths.has(file);
-    const lookup = {
-        has,
-        declares: (file, name) => Boolean(files.get(file)?.metadata?.symbolRanges?.[name]),
-        reexports: (file) => (files.get(file)?.metadata?.imports || []).map(specifier => resolveImportPath(file, specifier, has)).filter(Boolean)
-    };
-    // name -> the non-test code files that declare it, built once on first use
-    let byName = null;
-    const declarers = () => {
-        if (byName) return byName;
-        byName = new Map();
-        for (const [file, info] of files) {
-            if (info.type !== 'CodeFile' || info.kind === 'test') continue;
-            for (const name of Object.keys(info.metadata?.symbolRanges || {})) byName.set(name, [...(byName.get(name) || []), file]);
-        }
-        return byName;
-    };
-    const relations = [];
-    for (const [file, info] of files) {
-        if (info.type === 'Config') {
-            // An npm script that starts a script: package.json RUNS it.
-            for (const target of info.metadata?.runs || []) {
-                if (codePaths.has(target)) relations.push({ from: fileNodeId(file), to: fileNodeId(target), relation: 'RUNS', confidence: 'EXTRACTED', createdAt: now });
-            }
-        } else if (info.type === 'CodeFile') {
-            // Code that names a config file (by file name) READS it.
-            for (const name of info.metadata?.reads || []) {
-                for (const target of configPaths.filter(config => config === name || config.endsWith(`/${name}`))) {
-                    relations.push({ from: fileNodeId(file), to: fileNodeId(target), relation: 'READS', confidence: 'INFERRED', createdAt: now });
-                }
-            }
-            for (const specifier of info.metadata?.imports || []) {
-                const target = resolveImportPath(file, specifier, has);
-                if (!target || target === file) continue;
-                relations.push({ from: fileNodeId(file), to: fileNodeId(target), relation: info.kind === 'test' ? 'TESTS' : 'IMPORTS', confidence: 'EXTRACTED', createdAt: now });
-            }
-            // A call to a function of another file CALLS that file (through barrels); weight = number of call sites.
-            const callSites = new Map();
-            for (const [, name, , specifier] of info.metadata?.calls || []) {
-                const target = specifier ? resolveCallee({ from: file, name, specifier }, lookup) : null;
-                if (target && target !== file) callSites.set(target, (callSites.get(target) || 0) + 1);
-            }
-            for (const [target, weight] of callSites) relations.push({ from: fileNodeId(file), to: fileNodeId(target), relation: 'CALLS', confidence: 'EXTRACTED', weight, createdAt: now });
-        } else if (info.type === 'Document') {
-            relations.push(...deriveDocumentRelations(file, info, { codePaths, docPaths, declarers, now }));
-        }
-    }
-    return relations;
-}
-
+export const FACTS_VERSION = 7;
 /**
  * @param {{root?: string, repository?: object, settings?: object, now?: () => number, contribute?: boolean}} [options]
  *   contribute: false leaves out the host's contributors (a graph of another folder, e.g. a package, is not the host's)
+ *   git: the host's git port (core/git); without it no branch or commit is recorded
  */
-export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepository(), settings, now = Date.now, contribute = true } = {}) {
+export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepository(), settings, now = Date.now, contribute = true, git = null } = {}) {
     // with `known`, a file whose size and modification time match what was stored is not read again (every question
     // re-read and re-hashed all 25,000 files: 3.5 s). Without `known` (a full sync) every file is read.
     let resolvedSettings = settings;
@@ -162,21 +71,14 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
         return { added, changed, removed };
     }
 
-    function entityFor(file, source, stamp, entryPoints) {
-        if (isDocFile(file)) return buildDocumentEntity(file, source, { now: stamp });
-        if (isConfigFile(file)) return buildConfigEntity(file, source, { now: stamp });
-        const scriptPaths = [...DEFAULT_SCRIPT_PATHS, ...(resolvedSettings?.project?.script_paths || [])];
-        const entity = buildCodeEntity(file, source, { now: stamp, includeAst: resolvedSettings?.graph?.ast?.enabled === true, scriptPaths });
-        if (entryPoints.has(file)) entity.metadata.keywords = [...entity.metadata.keywords, 'cli', 'entrypoint', 'command'];
-        return entity;
-    }
-
     async function write(known, current, filesToIndex, removed) {
         const stamp = new Date(now()).toISOString();
-        const entryPoints = entryPointsOf(root);
+        let packageJson = '';
+        try { packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8'); } catch { /* none */ }
+        const entryPoints = entryPointsFrom(packageJson);
         const upserts = filesToIndex.map(file => {
             try {
-                const entity = entityFor(file, current.get(file).source, stamp, entryPoints);
+                const entity = entityFor(file, current.get(file).source, { stamp, entryPoints, settings: resolvedSettings });
                 entity.metadata = { ...entity.metadata, facts: FACTS_VERSION, ...(current.get(file).stat ? { stat: current.get(file).stat } : {}) };
                 return entity;
             } catch (err) {
@@ -185,19 +87,19 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
                 throw e;
             }
         });
-
         const merged = new Map(known);
         for (const file of removed) merged.delete(file);
         for (const entity of upserts) merged.set(entity.path, { id: entity.id, type: entity.type, kind: entity.kind, hash: entity.contentHash, metadata: entity.metadata });
-
+        // only the files that were read again can bring new dependency nodes; the rest are in the graph already
+        const dependencyNodes = dependencyNodesOf(upserts, stamp);
         const extra = contribute ? await contributed(root, merged, stamp) : { nodes: [], relations: [] };
-        // What changes together (git history), recomputed at every write.
-        const coChange = coChangeRelations(root, new Set([...merged.keys()].filter(file => merged.get(file).type === 'CodeFile')), { now: stamp });
-        const totals = await repository.applyProjectChanges({ upserts: [...upserts, ...extra.nodes], removePaths: removed, relations: [...deriveProjectRelations(merged, stamp), ...coChange, ...extra.relations] });
+        const mendix = contribute ? await mendixContributor({ root }) : { nodes: [], relations: [] };
+        const coChange = coChangeRelations(git ?? createGit({ root }), new Set([...merged.keys()].filter(file => merged.get(file).type === 'CodeFile')), { now: stamp });
+        const totals = await repository.applyProjectChanges({ upserts: [...upserts, ...dependencyNodes, ...extra.nodes, ...mendix.nodes], removePaths: removed,
+            relations: [...deriveProjectRelations(merged, stamp), ...coChange, ...extra.relations, ...mendix.relations] });
         return totals;
     }
-
-    return {
+    const api = {
         repository,
 
         /** Staleness report; writes nothing. */
@@ -217,8 +119,15 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
             };
         },
 
+        /** Bring the project scope up to date and record branch and commit (`branch`, `commit`, `commitsSince`). */
+        async sync(options = {}) {
+            const result = await api.syncFiles(options);
+            const head = await recordHead({ repository, git, wrote: result.wrote !== false, now: new Date(now()).toISOString() });
+            return head ? { ...result, ...head } : result;
+        },
+
         /** Bring the project scope up to date. `mode: 'full'` re-indexes every file. */
-        async sync({ mode = 'incremental' } = {}) {
+        async syncFiles({ mode = 'incremental' } = {}) {
             const started = Date.now();
             const stored = await repository.projectFiles();
             const current = await scan(mode === 'full' ? null : stored);
@@ -268,4 +177,5 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
             return { removed: known.size };
         }
     };
+    return api;
 }

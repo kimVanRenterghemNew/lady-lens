@@ -2,8 +2,9 @@
  * Generic multi-language extractor engine (Story 23.11).
  * Extracts symbols, ranges, exports, imports, calls and complexity using data-driven language configs.
  */
+import { findIndentedBlockEnd } from './blocks.js';
 
-function buildLineOffsets(source) {
+export function buildLineOffsets(source) {
     const offsets = [0];
     for (let i = 0; i < source.length; i++) {
         if (source[i] === '\n') offsets.push(i + 1);
@@ -11,7 +12,7 @@ function buildLineOffsets(source) {
     return offsets;
 }
 
-function lineAt(source, index, lineOffsets = null) {
+export function lineAt(source, index, lineOffsets = null) {
     if (!lineOffsets) {
         let line = 1;
         for (let i = 0; i < index && i < source.length; i++) {
@@ -28,13 +29,15 @@ function lineAt(source, index, lineOffsets = null) {
     return low;
 }
 
-function isCommentLine(source, index) {
+const DEFAULT_COMMENT_PREFIXES = ['//', '/*', '*', '#', '--'];
+
+export function isCommentLine(source, index, prefixes = DEFAULT_COMMENT_PREFIXES) {
     const lineStart = source.lastIndexOf('\n', index) + 1;
     const prefix = source.slice(lineStart, index).trimStart();
-    return prefix.startsWith('//') || prefix.startsWith('/*') || prefix.startsWith('*');
+    return prefixes.some(p => prefix.startsWith(p));
 }
 
-function findBlockEnd(source, openBraceIndex) {
+export function findBlockEnd(source, openBraceIndex) {
     let depth = 0;
     for (let i = openBraceIndex; i < source.length; i++) {
         if (source[i] === '{') depth++;
@@ -48,14 +51,30 @@ function findBlockEnd(source, openBraceIndex) {
 
 const CC_KEYWORDS = /\b(if|while|for|foreach|catch|case)\b|(?:\?[\s\S]*?:)|(?:&&|\|\||\?\?)/g;
 
-function countDecisionsInBody(bodyText) {
+export function countDecisionsInBody(bodyText) {
     const matches = bodyText.match(CC_KEYWORDS);
     return matches ? matches.length : 0;
 }
 
 export function extractWithConfig(source, config, filePath = '') {
+    if (typeof config.extract === 'function') {
+        const custom = config.extract(source, filePath);
+        return {
+            purpose: '',
+            exports: [],
+            symbols: [],
+            symbolRanges: {},
+            imports: [],
+            calls: [],
+            functions: [],
+            parseError: null,
+            ...custom
+        };
+    }
+
     const lineOffsets = buildLineOffsets(source);
     const getLine = (index) => lineAt(source, index, lineOffsets);
+    const commentPrefixes = config.commentPrefixes || DEFAULT_COMMENT_PREFIXES;
 
     const result = {
         purpose: config.extractPurpose ? config.extractPurpose(source) : '',
@@ -68,10 +87,13 @@ export function extractWithConfig(source, config, filePath = '') {
         parseError: null
     };
 
-    // 1. Imports / Usings
+    // 1. Imports / Usings / Requires
     if (config.importPattern) {
         for (const match of source.matchAll(config.importPattern)) {
             if (match[1]) result.imports.push(match[1].trim());
+            if (match[2]) {
+                match[2].split(',').forEach(imp => result.imports.push(imp.trim()));
+            }
         }
         result.imports = [...new Set(result.imports)];
     }
@@ -79,44 +101,56 @@ export function extractWithConfig(source, config, filePath = '') {
     // 2. Types (Classes, Interfaces, Structs, Records)
     if (config.typePattern) {
         for (const match of source.matchAll(config.typePattern)) {
-            if (isCommentLine(source, match.index)) continue;
-            const name = match[2];
-            const startLine = getLine(match.index);
-            const openBrace = source.indexOf('{', match.index + match[0].length);
-            const endLine = openBrace !== -1 ? getLine(findBlockEnd(source, openBrace)) : startLine;
-
-            result.symbols.push(name);
-            result.exports.push(name);
-            result.symbolRanges[name] = [startLine, endLine];
+            if (isCommentLine(source, match.index, commentPrefixes)) continue;
+            const name = match[match.length - 1] || match[1];
+            if (name) {
+                result.symbols.push(name);
+                result.exports.push(name);
+                const startLine = getLine(match.index);
+                result.symbolRanges[name] = [startLine, startLine];
+            }
         }
     }
 
-    // 3. Methods & Constructors
+    // 3. Methods, Functions & Constructors
     const methodMatches = [];
-    if (config.methodPattern) {
-        for (const match of source.matchAll(config.methodPattern)) {
-            if (isCommentLine(source, match.index)) continue;
-            methodMatches.push({ name: match[2], params: match[3], index: match.index });
+    const methodPatterns = config.methodPatterns || [config.methodPattern].filter(Boolean);
+    for (const methodPattern of methodPatterns) {
+        for (const match of source.matchAll(methodPattern)) {
+            if (isCommentLine(source, match.index, commentPrefixes)) continue;
+            const name = match[match.length - 2] || match[1];
+            const params = match[match.length - 1] || '';
+            if (name) methodMatches.push({ name, params, index: match.index });
         }
     }
-    if (config.constructorPattern) {
-        for (const match of source.matchAll(config.constructorPattern)) {
-            if (isCommentLine(source, match.index)) continue;
-            methodMatches.push({ name: match[1], params: match[2], index: match.index });
+    const constructorPatterns = config.constructorPatterns || [config.constructorPattern].filter(Boolean);
+    for (const constructorPattern of constructorPatterns) {
+        for (const match of source.matchAll(constructorPattern)) {
+            if (isCommentLine(source, match.index, commentPrefixes)) continue;
+            const name = match[match.length - 2] || match[1];
+            const params = match[match.length - 1] || '';
+            if (name) methodMatches.push({ name, params, index: match.index });
         }
     }
 
     for (const item of methodMatches) {
         const name = item.name;
+        if (!name) continue;
         const startLine = getLine(item.index);
-        const openBrace = source.indexOf('{', item.index);
-        let endLine = startLine;
+        let endLine;
         let bodyText = '';
 
-        if (openBrace !== -1) {
-            const closeIndex = findBlockEnd(source, openBrace);
-            endLine = getLine(closeIndex);
-            bodyText = source.slice(openBrace, closeIndex + 1);
+        if (config.indentationBased) {
+            const endIndex = findIndentedBlockEnd(source, item.index);
+            endLine = getLine(endIndex);
+            bodyText = source.slice(item.index, endIndex + 1);
+        } else {
+            const openBrace = source.indexOf('{', item.index);
+            if (openBrace !== -1) {
+                const closeIndex = findBlockEnd(source, openBrace);
+                endLine = getLine(closeIndex);
+                bodyText = source.slice(openBrace, closeIndex + 1);
+            }
         }
 
         if (!result.symbolRanges[name]) {
@@ -130,33 +164,22 @@ export function extractWithConfig(source, config, filePath = '') {
         const cc = 1 + countDecisionsInBody(bodyText);
 
         const issues = [];
-        if (cc > 15) issues.push('high-cyclomatic-complexity');
-        if (lines > 60) issues.push('large-function');
-        if (params > 5) issues.push('too-many-params');
 
-        result.functions.push({
-            name,
-            loc: [startLine, endLine],
-            lines,
-            params,
-            cyclomaticComplexity: cc,
-            issues
-        });
-
-        // Calls inside method
+        // Extract calls
         if (config.callPattern && bodyText) {
             for (const callMatch of bodyText.matchAll(config.callPattern)) {
                 const callee = callMatch[1];
-                if (callee !== name && !['if', 'for', 'foreach', 'while', 'switch', 'catch', 'typeof', 'sizeof'].includes(callee)) {
+                if (callee !== name && !['if', 'for', 'foreach', 'while', 'switch', 'catch', 'typeof', 'sizeof', 'elif', 'except', 'def', 'class', 'return', 'import', 'from'].includes(callee)) {
                     result.calls.push([name, callee, startLine]);
                 }
             }
         }
+
+        result.functions.push({ name, startLine, endLine, lines, params, cc, issues });
     }
 
     result.exports = [...new Set(result.exports)];
     result.symbols = [...new Set(result.symbols)];
-    result.isTest = config.isTestFile ? config.isTestFile(filePath, source) : false;
-
+    result.calls = [...new Set(result.calls)];
     return result;
 }

@@ -1,7 +1,10 @@
 import { debug } from '../observability/index.js';
 import { REPO_ROOT } from '../configuration/index.js';
-import { codeHealth, healthSignals, commitFiles } from '../graph/index.js';
+import { codeHealth, healthSignals, hubsAndBridges } from '../graph/index.js';
+import { createGit } from '../git/index.js';
 import { refreshProjectGraph, loadGraphModel, readRepoFile, loadCoverage } from './graphModelLoader.js';
+
+const commitFiles = root => createGit({ root }).commitFiles();
 
 let churnCache = { root: null, time: 0, churn: new Map() };
 const CHURN_TTL_MS = 60000;
@@ -30,7 +33,7 @@ export function getRepoChurn(root, history = commitFiles) {
 }
 
 export async function healthTool(args = {}, { refresh = refreshProjectGraph, history = commitFiles } = {}) {
-    const { file, module, limit = 20 } = args ?? {};
+    const { file, module, limit = 20, hubs = false, bridges = false } = args ?? {};
     const freshness = await refresh();
     let loaded;
     try {
@@ -57,6 +60,7 @@ export async function healthTool(args = {}, { refresh = refreshProjectGraph, his
         topCentralNodes: report.topCentralNodes || [],
         zoneOfPain: report.zoneOfPain || [],
         complexFunctions: (report.complexFunctions || []).slice(0, max),
+        ...hubsAndBridges(loaded.graph, { hubs, bridges, limit: max }),
         truncated: report.files.length > max,
         source: loaded.source,
         freshness

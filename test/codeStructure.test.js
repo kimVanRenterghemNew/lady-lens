@@ -18,13 +18,12 @@ const SOURCE = /\.(m?js|html|css)$/;
 /** Too big today, with the maximum each may still have. Only lower. */
 const TOO_BIG = Object.freeze({
     'core/graph/model/graphModel.js': 209,
-    'core/graph/query/graphQuery.js': 244,
+    'core/graph/query/graphQuery.js': 233,
     'core/graph/query/graphRank.js': 221,
     'core/graph/query/graphSemantic.js': 238,
     'core/graph/query/importLookup.js': 221,
     'core/graph/sync/codeFacts.js': 215,
-    'core/graph/sync/graphSync.js': 271,
-    'core/mcp/httpServer.js': 281,
+    'core/mcp/httpServer.js': 278,
 });
 
 /** .js files that still contain markup. Only remove entries. */
@@ -76,8 +75,8 @@ describe('code structure', () => {
     });
 
     it('MUST reject: a new file of 201 lines, an exception that grows, and HTML in a .js file', () => {
-        expect(tooLong(['core/x/index.js', 'core/graph/sync/graphSync.js'], f => (f === 'core/x/index.js' ? 201 : 278), TOO_BIG))
-            .toEqual(['core/x/index.js: 201 lines (max. 200)', 'core/graph/sync/graphSync.js: 278 lines (max. 271)']);
+        expect(tooLong(['core/x/index.js',         'core/graph/sync/codeFacts.js'], f =>         (f === 'core/x/index.js' ? 201 : 270), TOO_BIG))
+                            .toEqual(['core/x/index.js: 201 lines (max. 200)', 'core/graph/sync/codeFacts.js: 270 lines (max. 215)']);
         const text = f => (f === 'core/x/page.js' ? 'return `<div class="card">`;' : 'const a = 1 < 2;');
         expect(mixed(['core/x/page.js', 'core/x/ok.js'], text)).toEqual(['core/x/page.js']);
     });

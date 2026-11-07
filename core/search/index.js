@@ -13,7 +13,9 @@ import { definedInTool } from './definedIn.js';
 import { importLookupTool, interfacesForScope, importedBy, imports } from './imports.js';
 import { graphFactTool, exportsTool, fileExists } from './exports.js';
 import { folderViewTool } from './folderView.js';
-import { functionViewTool } from './functionView.js';
+import { functionViewTool, viewOf } from './functionView.js';
+import { rankDocuments } from './docMentions.js';
+import { diffImpact } from './diffImpact.js';
 import { healthTool, getRepoChurn, invalidateChurnCache } from './codeHealth.js';
 import { packageFolderView, readPackageFile } from './packageFolderView.js';
 import { searchView } from './searchView.js';
@@ -65,6 +67,9 @@ export {
     fileExists,
     folderViewTool,
     functionViewTool,
+    viewOf,
+    rankDocuments,
+    diffImpact,
     healthTool,
     getRepoChurn,
     invalidateChurnCache,
@@ -103,6 +108,7 @@ export const RESEARCH_TOOLS = {
     exists: withBudget(args => fileExists(args), { lists: ['similar'], narrow: 'ask about one file' }),
     definedIn: withBudget(args => definedInTool(args), { lists: ['locations'], narrow: 'ask about one symbol' }),
     functionView: withBudget(args => functionViewTool(args), { lists: ['tests', 'callers', 'stories'], narrow: 'ask about one symbol' }),
+    diff_impact: withBudget(args => diffImpact(args), { lists: ['testGaps', 'functions'], narrow: 'lower limit, or diff a smaller range' }),
     folderView: withBudget(args => folderViewTool(args), { lists: ['parts', 'flow'], texts: ['text'], narrow: 'ask about a smaller folder' }),
     health: withBudget(args => healthTool(args), { lists: ['hotspots', 'cycles', 'modules', 'files'], narrow: 'ask about one module or file, or lower limit' }),
     searchView: withBudget(args => searchView(args), { lists: ['files'], narrow: 'use a more specific query or include filter' }),

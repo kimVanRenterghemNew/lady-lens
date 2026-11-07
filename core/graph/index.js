@@ -7,4 +7,4 @@ export { createLadybugRepositoryStore } from './adapters/ladybug/index.js';
 export { GRAPH_STORE_METHODS } from './ports/index.js';
 export { configureLensEnv, configureLensRoot } from '../configuration/index.js';
 export { configureLensLog } from '../observability/index.js';
-export { buildCodeEntity, buildDocumentEntity, buildConfigEntity, fileNodeId, documentNodeId, documentMentions } from './adapters/ladybug/index.js';
+export { buildCodeEntity, buildDependencyEntity, buildDocumentEntity, buildConfigEntity, dependencyNodeId, fileNodeId, documentNodeId, documentMentions } from './adapters/ladybug/index.js';

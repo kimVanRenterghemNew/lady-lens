@@ -10,27 +10,25 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
     CallToolRequestSchema,
-    ListToolsRequestSchema,
-    ErrorCode,
-    McpError
+    ListToolsRequestSchema
 } from '@modelcontextprotocol/sdk/types.js';
 
-import { RESEARCH_TOOLS, RESEARCH_TOOL_SCHEMAS } from '../search/index.js';
-import { createGraphSync } from '../graph/index.js';
-import { configureLensRoot, REPO_ROOT } from '../configuration/index.js';
+import { RESEARCH_TOOL_SCHEMAS } from '../search/index.js';
+import { configureLensRoot } from '../configuration/index.js';
 import {
-    listRegisteredRepos,
-    registerRepo,
-    unregisterRepo,
     resolveRepoTarget,
+    findRegisteredRepo,
     idOfRepo,
     databasePathOfRepo
 } from '../repository/index.js';
 import { buildMcpToolSchemas } from './managementSchemas.js';
+import { callTool } from './toolRoutes.js';
 
 export const MCP_SERVER_INFO = {
     name: 'lady-lens',
-    version: '1.0.0'
+    version: (() => {
+        try { return JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version; } catch { return 'unknown'; }
+    })()
 };
 
 export { buildMcpToolSchemas };
@@ -46,6 +44,24 @@ export function activateRepoContext(repoTarget) {
     process.env.LENS_REPO_ROOT = resolvedPath;
     process.env.LENS_GRAPH_DB = database;
     process.env.LENS_PROJECT_GRAPH = '1';
+}
+
+// The active repo lives in process-wide state, so tool calls for different repos must not interleave.
+let repoLockChain = Promise.resolve();
+function withRepoLock(fn) {
+    const run = repoLockChain.then(fn);
+    repoLockChain = run.catch(() => {});
+    return run;
+}
+
+/** Runs fn with `hint` (a registered repo) or the default repo active; shares the lock with MCP tool calls. */
+export function runInRepo(hint, defaultRepo, fn) {
+    return withRepoLock(async () => {
+        const target = hint ? findRegisteredRepo(hint) : resolveRepoTarget(defaultRepo);
+        if (!target) throw Object.assign(new Error(`Repository not registered: ${hint}. Run 'lens add <folder>' first.`), { status: 403 });
+        activateRepoContext(target);
+        return fn(target);
+    });
 }
 
 export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
@@ -69,12 +85,13 @@ export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
             tools: toolSchemas.map(t => ({
                 name: t.name,
                 description: t.description,
-                inputSchema: t.parameters
+                inputSchema: t.parameters,
+                annotations: { readOnlyHint: t.readOnly }
             }))
         };
     });
 
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.setRequestHandler(CallToolRequestSchema, (request) => withRepoLock(async () => {
         const { name, arguments: rawArgs = {} } = request.params;
         const args = { ...rawArgs };
 
@@ -90,71 +107,7 @@ export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
                 activateRepoContext(currentRepo);
             }
 
-            // Repo management tools
-            if (name === 'repo_list') {
-                const repos = listRegisteredRepos();
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(repos, null, 2) }]
-                };
-            }
-
-            if (name === 'repo_add') {
-                const targetPath = path.resolve(args.path);
-                const reg = registerRepo(targetPath, { db: args.db || args.database });
-                let syncResult = null;
-                if (args.sync !== false) {
-                    activateRepoContext(reg);
-                    syncResult = await createGraphSync().sync({ mode: 'incremental' });
-                    registerRepo(targetPath, {
-                        lastSync: new Date().toISOString(),
-                        nodes: syncResult.nodes
-                    });
-                }
-                return {
-                    content: [{
-                        type: 'text',
-                        text: JSON.stringify({ registered: reg, sync: syncResult }, null, 2)
-                    }]
-                };
-            }
-
-            if (name === 'repo_remove') {
-                const removed = unregisterRepo(args.repo);
-                return {
-                    content: [{
-                        type: 'text',
-                        text: JSON.stringify({ removed: !!removed, repo: removed }, null, 2)
-                    }]
-                };
-            }
-
-            if (name === 'repo_sync') {
-                const syncResult = await createGraphSync().sync({
-                    mode: args.full ? 'full' : 'incremental'
-                });
-                const activePath = process.env.LENS_REPO_ROOT || REPO_ROOT;
-                registerRepo(activePath, {
-                    lastSync: new Date().toISOString(),
-                    nodes: syncResult.nodes
-                });
-                return {
-                    content: [{ type: 'text', text: JSON.stringify(syncResult, null, 2) }]
-                };
-            }
-
-            // Research tools
-            const toolFn = RESEARCH_TOOLS[name];
-            if (!toolFn) {
-                throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-            }
-
-            const result = await toolFn(args);
-            return {
-                content: [{
-                    type: 'text',
-                    text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
-                }]
-            };
+            return await callTool(name, args, { activate: activateRepoContext });
         } catch (error) {
             return {
                 content: [{
@@ -164,7 +117,7 @@ export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
                 isError: true
             };
         }
-    });
+    }));
 
     return server;
 }

@@ -4,8 +4,10 @@
  */
 import fs from 'fs';
 import { openLadybugGraph, upsertEntities, createRelations, resolveDatabasePath } from './ladybugGraphStore.js';
+import { lensEnv } from '../../../configuration/index.js';
 import { PROJECT_SCOPE, parseJson, rowToNode, rowToStoredNode, rowToEdge } from '../../model/index.js';
 import { createDirectQueries } from './directQueries.js';
+import { clearProject, projectCounts } from './projectWriteQueries.js';
 
 export { rowToNode };
 
@@ -14,6 +16,10 @@ const NODE_RETURN = 'n.id AS id, n.type AS type, n.kind AS kind, n.scope AS scop
 
 const DB_QUEUES = new Map();
 const LOCK_ERROR = /could not set lock|lock on file|database is locked|Error: 33/i;
+const configuredBatchSize = Number(lensEnv('GRAPH_WRITE_BATCH_SIZE'));
+const PROJECT_WRITE_BATCH_SIZE = Number.isFinite(configuredBatchSize) && configuredBatchSize > 0
+    ? Math.floor(configuredBatchSize)
+    : 500;
 
 export async function openWithLockRetry(open, databasePath, { attempts = 12, delayMs = 250 } = {}) {
     for (let attempt = 1; ; attempt++) {
@@ -78,21 +84,25 @@ export function createLadybugRepositoryStore({ databasePath, open = openLadybugG
         },
 
         async applyProjectChanges(scope, { upserts = [], removePaths = [], relations = [] } = {}) {
-            return withGraph(async graph => {
-                if (removePaths.length) {
-                    await graph.query('MATCH (n:Entity) WHERE n.scope = $scope AND n.path IN $paths DETACH DELETE n', { scope, paths: removePaths });
-                }
-                await upsertEntities(graph, upserts.map(entity => ({ ...entity, scope })));
-                await graph.query('MATCH (a:Entity)-[e:RELATES]->(b:Entity) WHERE a.scope = $scope AND b.scope = $scope DELETE e', { scope });
-                await createRelations(graph, relations);
-                const [counts] = await graph.query(
-                    'MATCH (n:Entity) WHERE n.scope = $scope RETURN count(n) AS nodes', { scope }
-                );
-                const [edges] = await graph.query(
-                    'MATCH (a:Entity)-[e:RELATES]->(b:Entity) WHERE a.scope = $scope RETURN count(e) AS edges', { scope }
-                );
-                return { nodes: Number(counts.nodes), edges: Number(edges.edges) };
-            });
+            if (upserts.length <= PROJECT_WRITE_BATCH_SIZE && removePaths.length <= PROJECT_WRITE_BATCH_SIZE && relations.length <= PROJECT_WRITE_BATCH_SIZE) {
+                return withGraph(async graph => {
+                    await clearProject(graph, scope, removePaths, PROJECT_WRITE_BATCH_SIZE);
+                    await upsertEntities(graph, upserts.map(entity => ({ ...entity, scope })));
+                    await createRelations(graph, relations);
+                    return projectCounts(graph, scope);
+                });
+            }
+
+            await withGraph(graph => clearProject(graph, scope, removePaths, PROJECT_WRITE_BATCH_SIZE));
+            for (let i = 0; i < upserts.length; i += PROJECT_WRITE_BATCH_SIZE) {
+                const batch = upserts.slice(i, i + PROJECT_WRITE_BATCH_SIZE);
+                await withGraph(graph => upsertEntities(graph, batch.map(entity => ({ ...entity, scope }))));
+            }
+            for (let i = 0; i < relations.length; i += PROJECT_WRITE_BATCH_SIZE) {
+                const batch = relations.slice(i, i + PROJECT_WRITE_BATCH_SIZE);
+                await withGraph(graph => createRelations(graph, batch));
+            }
+            return withGraph(graph => projectCounts(graph, scope));
         },
 
         /** `entities` and `relations` are already in Ladybug input shape (the repository maps the DTOs). */

@@ -6,7 +6,8 @@
  */
 import http from 'http';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { createLadyLensMcpServer, buildMcpToolSchemas } from './server.js';
+import { createLadyLensMcpServer, buildMcpToolSchemas, MCP_SERVER_INFO } from './server.js';
+import { handleStreamableHttpRequest } from './streamableHttp.js';
 import { resolveRepoTarget, idOfRepo } from '../repository/index.js';
 
 export function createMcpDashboardHtml({ repo, port, tools, uiPort = 4317 }) {
@@ -133,13 +134,17 @@ export function createMcpDashboardHtml({ repo, port, tools, uiPort = 4317 }) {
 <body>
     <div class="container">
         <div class="header">
-            <span class="badge">Running</span>
+            <span class="badge">Running · v${MCP_SERVER_INFO.version}</span>
             <h1>lady-lens MCP Server</h1>
             <p class="subtitle">Model Context Protocol endpoint for AI coding agents</p>
         </div>
 
         <div class="card">
             <h2>Connection Endpoints</h2>
+            <div class="meta-row">
+                <span class="meta-label">Streamable HTTP Endpoint</span>
+                <span class="meta-value"><a href="http://127.0.0.1:${port}/mcp">http://127.0.0.1:${port}/mcp</a></span>
+            </div>
             <div class="meta-row">
                 <span class="meta-label">SSE Endpoint</span>
                 <span class="meta-value"><a href="http://127.0.0.1:${port}/sse">http://127.0.0.1:${port}/sse</a></span>
@@ -203,22 +208,14 @@ export function createMcpHttpServer({ defaultRepo = process.cwd(), port = 4318, 
             return;
         }
 
+        if (url.pathname === '/mcp') {
+            await handleStreamableHttpRequest(req, res, { defaultRepo });
+            return;
+        }
+
         if (url.pathname === '/sse') {
             if (req.method !== 'GET') {
                 res.writeHead(405).end('Method Not Allowed');
-                return;
-            }
-
-            // If a browser navigates to /sse directly expecting HTML:
-            if (req.headers.accept?.includes('text/html') && !req.headers.accept?.includes('text/event-stream')) {
-                const currentPort = httpServer.address()?.port || port;
-                res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                res.end(`<!DOCTYPE html><html><body style="font-family: -apple-system, sans-serif; padding: 32px; line-height: 1.5; color: #1e293b;">
-                    <h2>lady-lens MCP Server: SSE Endpoint</h2>
-                    <p>This endpoint (<code>http://127.0.0.1:${currentPort}/sse</code>) is a Server-Sent Events (SSE) stream for MCP clients (Cursor, Claude Code, Antigravity, etc.).</p>
-                    <p>Configure this URL in your MCP client settings.</p>
-                    <p><a href="/">View MCP Dashboard</a> &nbsp;|&nbsp; <a href="http://127.0.0.1:${uiPort}">Open UI Dashboard</a></p>
-                </body></html>`);
                 return;
             }
 

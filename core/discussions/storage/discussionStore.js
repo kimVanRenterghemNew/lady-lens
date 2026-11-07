@@ -5,7 +5,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { createGraphRepository, sessionScope } from '../../graph/index.js';
+import { createGraphRepository, sessionScope, recordHead, commitNodeId, branchNodeId } from '../../graph/index.js';
 import { REPO_ROOT } from '../../configuration/index.js';
 import {
     buildDiscussionRecord,
@@ -36,14 +36,18 @@ function createSourceStubNode(targetId, rawTarget, scope, now) {
 export async function saveDiscussion({
     key = null, question, responses = {}, sources = [], sessionId = 'default', scope = null,
     writeMarkdown = false, markdownDir = null, baseDir = null, metadata = {},
-    repository = null, now = new Date().toISOString()
+    repository = null, git = null, origin = null, now = new Date().toISOString()
 } = {}) {
-    const record = buildDiscussionRecord({ key, question, responses, sources, metadata, date: now.slice(0, 10) });
+    const repo = repository || createGraphRepository();
+    const head = origin || await recordHead({ repository: repo, git, now });
+    const record = buildDiscussionRecord({ key, question, responses, sources, metadata: { ...metadata, ...(head ? { branch: head.branch, commit: head.sha.slice(0, 7), commitSha: head.sha } : {}) }, date: now.slice(0, 10) });
     const targetScope = scope || sessionScope(sessionId);
     const node = createDiscussionNode(record, { scope: targetScope, now });
     const edges = createDiscussionEdges(node.id, sources, { scope: targetScope, now });
-
-    const repo = repository || createGraphRepository();
+    if (head) {
+        const link = { from: node.id, confidence: 'EXTRACTED', weight: 0.5, scope: targetScope, createdAt: now, updatedAt: now };
+        edges.push({ ...link, to: commitNodeId(head.sha), type: 'CREATED_AT', relation: 'CREATED_AT' }, { ...link, to: branchNodeId(head.branch), type: 'ON_BRANCH', relation: 'ON_BRANCH' });
+    }
     const sourceStubs = [];
     for (const source of sources) {
         const rawTarget = typeof source === 'string' ? source : (source.file || source.target || source.id || source.node);
@@ -121,7 +125,8 @@ export async function editDiscussion({
 
     const saved = await saveDiscussion({
         key: recordKey, question: updatedTitle, responses, sources: mergedSources,
-        sessionId, scope: targetScope, writeMarkdown, baseDir, repository: repo, now
+        sessionId, scope: targetScope, writeMarkdown, baseDir, repository: repo, now,
+        origin: current.commitSha && current.branch ? { sha: current.commitSha, branch: current.branch } : null
     });
     return { ...saved, saved: true, updated: true };
 }

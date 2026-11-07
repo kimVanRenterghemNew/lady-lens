@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { createGraphSync, createGraphRepository, coChangeRelations, PROJECT_SCOPE } from '../core/graph/index.js';
+import { createGit } from '../core/git/index.js';
 
 const SETTINGS = { project: { graph_roots: ['.'], exclude_dirs: ['.git', '.memory'], graph_extensions: ['.js'] }, graph: {} };
 let root;
@@ -31,7 +32,7 @@ describe('co-change from git history', () => {
         commit({ ...Object.fromEntries(Object.keys(bulk).map(k => [k, '// again\n'])), 'src/c.js': 'export const c = 3;\n' }, 'bulk 2');
         commit({ ...Object.fromEntries(Object.keys(bulk).map(k => [k, '// third\n'])), 'src/c.js': 'export const c = 4;\n' }, 'bulk 3');
 
-        const relations = coChangeRelations(root, new Set(['src/a.js', 'src/b.js', 'src/c.js', ...Object.keys(bulk)]));
+        const relations = coChangeRelations(createGit({ root }), new Set(['src/a.js', 'src/b.js', 'src/c.js', ...Object.keys(bulk)]));
         expect(relations.map(r => [r.from, r.to, r.weight])).toEqual([['file:src/a.js', 'file:src/b.js', 3]]);
 
         const repository = createGraphRepository({ databasePath: path.join(root, '.memory', 'graph.lbdb') });
@@ -43,6 +44,6 @@ describe('co-change from git history', () => {
     it('a repository without git has no co-change, and the sync still works', async () => {
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-nogit-'));
         fs.writeFileSync(path.join(root, 'a.js'), 'export const a = 1;\n');
-        expect(coChangeRelations(root, new Set(['a.js']))).toEqual([]);
+        expect(coChangeRelations(createGit({ root }), new Set(['a.js']))).toEqual([]);
     });
 });

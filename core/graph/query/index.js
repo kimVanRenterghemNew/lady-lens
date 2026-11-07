@@ -8,3 +8,4 @@ export { folderView, renderFolderView, reexportedPackage } from './folderView.js
 export { codeHealth, coverageFromSummary, configureLensHealthSignals, healthSignals } from './codeHealth.js';
 export { calculateArchitectureMetrics } from './architectureMetrics.js';
 export { fileImpact, barrelReach } from './impact.js';
+export { hubsAndBridges } from './hubsAndBridges.js';
