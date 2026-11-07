@@ -47,10 +47,10 @@ export function fileNodeId(relativePath) {
  */
 export function buildCodeEntity(relativePath, source, { now = new Date().toISOString(), includeAst = false, scriptPaths } = {}) {
     const isJs = /\.[cm]?js$/i.test(relativePath);
-    const facts = isLanguageSupported(relativePath)
-        ? analyzeSourceForLanguage(source, relativePath)
-        : isJs
-            ? analyzeSource(source)
+    const facts = isJs
+        ? analyzeSource(source)
+        : isLanguageSupported(relativePath)
+            ? analyzeSourceForLanguage(source, relativePath)
             : analyzeSourceForLanguage(source, relativePath);
     const kind = facts.isTest ? 'test' : fileKindOf(relativePath, scriptPaths ? { scriptPaths } : {});
     return {

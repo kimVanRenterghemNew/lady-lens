@@ -11,6 +11,7 @@ import {
     fileImpact
 } from '../graph/index.js';
 import { loadGraphModel, freshnessFor, readRepoFile, loadCoverage } from './graphModelLoader.js';
+import { rankDocuments } from './docMentions.js';
 
 const SESSION_ID = /^[a-zA-Z0-9._-]+$/;
 const IMPORT_QUERY_LIMIT = 5000;
@@ -40,13 +41,16 @@ export async function graph_query(args = {}) {
     }
     let result;
     let context = '';
+    let startNode;
     if (node) {
         const asImportType = (spec) => (spec && typeof spec === 'object' && isImportEdgeType(spec.type) ? { ...spec, type: IMPORT_EDGE } : spec);
         const importQuery = [incoming, outgoing].some(spec => spec && typeof spec === 'object' && isImportEdgeType(spec.type));
         const chunkId = node.startsWith('chunk:') ? node : `chunk:${node}`;
-        const startNode = loaded.graph.getNode(node)
+        startNode = loaded.graph.getNode(node)
             ? node
             : (loaded.graph.getNode(chunkId) ? chunkId : (resolveCodeFile(loaded.graph, node).node?.id ?? node));
+        // ids are stored in lower case and getNode ignores case: compare with the stored id, not with what was asked
+        startNode = loaded.graph.getNode(startNode)?.id ?? startNode;
         try {
             result = queryGraph(loaded.graph, {
                 node: startNode, outgoing: asImportType(outgoing), incoming: asImportType(incoming), path: traversalPath, maxDepth, incomingDepth, outgoingDepth, filter,
@@ -64,12 +68,17 @@ export async function graph_query(args = {}) {
             if (relatedIds.has(edge.from)) relatedIds.add(edge.to);
             if (relatedIds.has(edge.to)) relatedIds.add(edge.from);
         }
-        const matches = Array.from(relatedIds).map(id => loaded.graph.getNode(id)).filter(Boolean).slice(0, limit);
+        const matches = args.kind === 'doc'
+            ? rankDocuments(loaded.graph, text, directMatches, { readFile: readRepoFile, limit })
+            : Array.from(relatedIds).map(id => loaded.graph.getNode(id)).filter(Boolean).slice(0, limit);
         result = { nodes: matches, edges: loaded.graph.edges.filter(edge => matches.some(match => match.id === edge.from || match.id === edge.to)) };
     }
     const provenance = { source, sessionId, totalNodes: loaded.graph.nodes.size, totalEdges: loaded.graph.edges.length, matchCount: result.nodes.length, freshness, scopes: loaded.scopes };
     const symbols = locateSymbols([...loaded.graph.nodes.values()], text ?? node);
-    const impact = node ? new Map() : fileImpact(loaded.graph, result.nodes.filter(match => match.type === 'CodeFile' && match.kind !== 'test').map(match => match.path), { readFile: readRepoFile, coverage: loadCoverage().coverage });
-    const nodes = result.nodes.map(match => ({ ...answerNode(match), ...impact.get(match.path) }));
-    return { available: true, sessionId, source, matchCount: result.nodes.length, nodes, edges: result.edges, symbols, context, freshness, provenance };
+    // node mode: the consequences and risks of the start node, as query mode gives them (only the start: its neighbours are the edges)
+    const impactOf = node ? result.nodes.filter(match => match.id === startNode) : result.nodes;
+    const impact = fileImpact(loaded.graph, impactOf.filter(match => match.type === 'CodeFile' && match.kind !== 'test').map(match => match.path), { readFile: readRepoFile, coverage: loadCoverage().coverage });
+    const nodes = result.nodes.map(match => ({ ...answerNode(match), ...impact.get(match.path), ...(match.mentions ? { mentions: match.mentions } : {}), ...(match.lines ? { lines: match.lines } : {}) }));
+    const hop = result.total === undefined ? {} : { total: result.total, truncated: result.truncated, ...(result.truncated ? { hint: `${result.total} neighbours, ${result.nodes.length - 1} shown: raise limit, or ask one edge type (incoming: { type: 'IMPORTS' })` } : {}) };
+    return { available: true, sessionId, source, matchCount: result.nodes.length, nodes, edges: result.edges, ...hop, symbols, context, freshness, provenance };
 }

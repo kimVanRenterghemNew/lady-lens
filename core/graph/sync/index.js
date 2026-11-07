@@ -1,6 +1,11 @@
-export { coChangeRelations, commitFiles } from './gitHistory.js';
-export { createGraphSync, isProjectGraphEnabled, deriveProjectRelations, configureLensContributors } from './graphSync.js';
+export { coChangeRelations } from './gitHistory.js';
+export { recordHead, commitNodeId, branchNodeId } from './headCommit.js';
+export { createGraphSync, isProjectGraphEnabled } from './graphSync.js';
+export { indexBranch, branchScope } from './branchIndex.js';
+export { deriveProjectRelations } from './projectRelations.js';
+export { configureLensContributors } from './contributors.js';
 export { deriveDocumentRelations } from './documentRelations.js';
 export { analyzeSource, fileKindOf, configFilesNamed, DEFAULT_SCRIPT_PATHS } from './codeFacts.js';
 export { extractFunctionComplexities, computeFunctionMetrics } from './functionComplexity.js';
+export { findMendixProject, mendixContributor } from './mendix.js';
 export { analyzeSourceForLanguage, isLanguageSupported, configForExtension, isCodeFile, isDocFile, isConfigFile, CODE_EXTENSIONS, DOC_EXTENSIONS, CONFIG_EXTENSIONS } from './languages/index.js';

@@ -123,6 +123,13 @@ describe('search folderView and functionView tools', () => {
             expect(res).toBeNull();
         });
 
+        it('shows a package whose main is its root index.js, and keeps a subpath on its folder', async () => {
+            const root = await packageFolderView('lady-lens');
+            expect(root.view).toMatchObject({ folder: '', found: true });
+            expect(root.view.parts.length).toBeGreaterThan(0);
+            expect((await packageFolderView('lady-lens/graph')).view).toMatchObject({ folder: 'core/graph', found: true });
+        }, 20000);
+
         it('resolves an installed package and renders view exercising readFile', async () => {
             const res = await packageFolderView('acorn');
             if (res) {

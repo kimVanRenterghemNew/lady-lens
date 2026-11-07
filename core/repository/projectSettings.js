@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
     project: {
         exclude_dirs: ['.git', '.memory', 'node_modules', 'outputs', 'coverage', 'dist', 'build', 'target', '.vs', '.idea'],
         graph_roots: ['.'],
-        graph_extensions: ['.js', '.mjs', '.ts', '.jsx', '.tsx', '.cs', '.csproj', '.sln', '.sql', '.ps1', '.md', '.yaml', '.yml', '.json']
+        graph_extensions: ['.js', '.mjs', '.ts', '.jsx', '.tsx', '.cs', '.csproj', '.sln', '.sql', '.ps1', '.md', '.yaml', '.yml', '.json', '.reference']
     },
     graph: {
         freshness: { default_max_age_days: 30 },

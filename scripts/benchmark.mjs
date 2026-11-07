@@ -17,7 +17,9 @@ import { fileURLToPath } from 'url';
 import { performance } from 'perf_hooks';
 import { createProfiler } from '../core/observability/index.js';
 import { configureLensRoot } from '../core/configuration/index.js';
-import { createGraphSync, createGraphRepository, rankGraphNodes } from '../core/graph/index.js';
+import { createGraphSync, createGraphRepository, rankGraphNodes, hubsAndBridges } from '../core/graph/index.js';
+import { createFakeGit } from '../core/git/index.js';
+import { crossRepoSearch } from '../core/mcp/handlers/index.js';
 import {
     graph_query,
     definedInTool,
@@ -28,6 +30,7 @@ import {
     functionViewTool,
     folderViewTool,
     healthTool,
+    diffImpact,
     loadGraphModel
 } from '../core/search/index.js';
 
@@ -161,10 +164,17 @@ export async function runBenchmark({ targetRoot } = {}) {
 
     // 9. Code Health
     console.log('9. Meten van Code Health (5 herhalingen)...');
-    for (let i = 0; i < 5; i++) {
-        const t0Health = performance.now();
-        await healthTool({});
-        profiler.record('Analysis: codeHealth', performance.now() - t0Health);
+    const timed = async (label, fn) => { const t0 = performance.now(); await fn(); profiler.record(label, performance.now() - t0); };
+    for (let i = 0; i < 5; i++) await timed('Analysis: codeHealth', () => healthTool({}));
+
+    console.log('10. Meten van diff_impact (alle functies van één bestand gewijzigd), cross_repo_search (3 mappen) en bridges...');
+    const readRoot = rel => { try { return fs.readFileSync(path.join(ROOT, rel), 'utf8'); } catch { return null; } };
+    const fakeGit = createFakeGit({ commits: [{ name: 'c1', parents: [], files: { [sampleFile]: '' } }], branches: { main: 'c1' }, head: 'main', worktree: { [sampleFile]: readRoot(sampleFile) } });
+    const projects = [ROOT, path.join(ROOT, path.dirname(sampleFile)), path.join(ROOT, sampleFolder)].map((dir, i) => ({ id: `p${i}`, path: dir }));
+    for (let i = 0; i < 3; i++) {
+        await timed('Analysis: diff_impact', () => diffImpact({}, { refresh: async () => null, git: fakeGit, repository, readFile: readRoot }));
+        await timed('Search: cross_repo_search', () => crossRepoSearch({ query: sampleSymbol, limit: 50 }, { list: () => projects, find: () => null }));
+        await timed('Analysis: hubs and bridges', () => hubsAndBridges(loadedModel.graph, { hubs: true, bridges: true }));
     }
 
     try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch { /* ignore */ }

@@ -15,8 +15,8 @@ export default defineConfig({
             include: ['core/**/*.js', 'ui/**/*.mjs'],
             exclude: [ "**/index.js" ],
             reportsDirectory: 'outputs/coverage',
-            // Ratchet: raise these as code lands, never lower them to get green.
-            thresholds: { statements: 85, branches: 75, functions: 85, lines: 88 },
+            // Ratchet: raise these as code lands, never lower them to get green!!
+            thresholds: { statements: 93, branches: 84, functions: 93, lines: 96 },
         },
     },
 });

@@ -29,5 +29,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run lint and coverage checks
-        run: npm run check
+      - name: Run tests
+        run: npm test
+
+      - name: Run coverage checks
+        run: npm run test:coverage
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Pack npm artifact
+        run: npm run pack
+
+      - name: Upload npm package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lady-lens-${{ matrix.os }}-node-${{ matrix.node-version }}
+          path: dist/*.tgz
+          if-no-files-found: error

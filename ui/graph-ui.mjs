@@ -26,43 +26,48 @@ export function overviewOf({ nodes, edges }) {
  * @param {{tools: Record<string, Function>, loadOverview: () => Promise<{nodes: object[], edges: object[]}>}} deps
  * @returns {http.Server}
  */
-export function createGraphUiServer({ tools, loadOverview, repo = null }) {
+export function createGraphUiServer({ tools, loadOverview, repo = null, runInRepo = null, listRepos = () => [] }) {
     const send = (res, status, body, type = 'application/json; charset=utf-8') => {
         res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
         res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
     };
+    // `?repo=` picks a registered project; without a host-provided runInRepo the single `repo` is used.
+    const inRepo = (url, fn) => runInRepo ? runInRepo(url.searchParams.get('repo'), fn) : fn({ path: repo });
     return http.createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         try {
             if (url.pathname === '/') return send(res, 200, PAGE, 'text/html; charset=utf-8');
             if (url.pathname === '/graph-ui.css') return send(res, 200, CSS, 'text/css; charset=utf-8');
             if (url.pathname === '/api/tools') return send(res, 200, Object.keys(tools));
-            if (url.pathname === '/api/repo') return send(res, 200, { repo });
-            if (url.pathname === '/api/overview') return send(res, 200, overviewOf(await loadOverview()));
+            if (url.pathname === '/api/repos') return send(res, 200, listRepos().map(({ id, path: repoPath }) => ({ id, path: repoPath })));
+            if (url.pathname === '/api/repo') return send(res, 200, await inRepo(url, target => ({ repo: target?.path ?? repo })));
+            if (url.pathname === '/api/overview') return send(res, 200, await inRepo(url, async () => overviewOf(await loadOverview())));
             if (url.pathname === '/api/health') {
-                if (tools.health) return send(res, 200, await tools.health({}));
-                const ov = await loadOverview();
-                const rep = codeHealth({ nodes: new Map(ov.nodes.map(n => [n.id, n])), edges: ov.edges });
-                return send(res, 200, {
-                    relation: 'health',
-                    summary: rep.summary,
-                    topCentralNodes: rep.topCentralNodes || [],
-                    zoneOfPain: rep.zoneOfPain || [],
-                    complexFunctions: (rep.complexFunctions || []).slice(0, 30),
-                    hotspots: rep.hotspots || [],
-                    cycles: rep.cycles || []
-                });
+                return send(res, 200, await inRepo(url, async () => {
+                    if (tools.health) return tools.health({});
+                    const ov = await loadOverview();
+                    const rep = codeHealth({ nodes: new Map(ov.nodes.map(n => [n.id, n])), edges: ov.edges });
+                    return {
+                        relation: 'health',
+                        summary: rep.summary,
+                        topCentralNodes: rep.topCentralNodes || [],
+                        zoneOfPain: rep.zoneOfPain || [],
+                        complexFunctions: (rep.complexFunctions || []).slice(0, 30),
+                        hotspots: rep.hotspots || [],
+                        cycles: rep.cycles || []
+                    };
+                }));
             }
             if (url.pathname === '/api/ask') {
                 const name = url.searchParams.get('tool');
                 if (!tools[name]) return send(res, 400, { error: `unknown tool "${name}"; available: ${Object.keys(tools).join(', ')}` });
                 let args;
                 try { args = JSON.parse(url.searchParams.get('args') ?? '{}'); } catch (error) { return send(res, 400, { error: `args must be JSON: ${error.message}` }); }
-                return send(res, 200, await tools[name](args));
+                return send(res, 200, await inRepo(url, () => tools[name](args)));
             }
             return send(res, 404, { error: 'not found' });
         } catch (error) {
-            return send(res, 500, { error: error.message });
+            return send(res, error.status || 500, { error: error.message });
         }
     });
 }

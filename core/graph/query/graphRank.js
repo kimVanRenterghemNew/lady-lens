@@ -46,13 +46,13 @@ function words(value) {
     return tokenize(Array.isArray(value) ? value.join(' ') : String(value ?? ''));
 }
 
-/** Shared prefix of >= 5 chars covering 75% of the shorter word: catches plurals and NL/EN cognates (sessie/session). */
+/** Shared prefix of >= 5 chars covering 75% of the shorter word and leaving at most 2 letters of the longer one: catches plurals and NL/EN cognates (sessie/session) but not compounds (check/checkout). */
 function sharesStem(term, tokens) {
     for (const token of tokens) {
         const limit = Math.min(term.length, token.length);
         let prefix = 0;
         while (prefix < limit && term[prefix] === token[prefix]) prefix += 1;
-        if (prefix >= 5 && prefix / limit >= 0.75) return true;
+        if (prefix >= 5 && prefix / limit >= 0.75 && Math.max(term.length, token.length) - prefix <= 2) return true;
     }
     return false;
 }
@@ -80,7 +80,7 @@ export function getNodeSearchIndex(node) {
     const stemOnly = filePath.split('/').pop() || '';
     const stem = stemOnly.replace(/\.[^.]+$/, '').replace(/\.(test|spec)$/, '');
     const exportTokens = new Set([...words(node.exports), ...words(node.keywords)]);
-    const nameWords = stem.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[\s._-]+/).filter(word => word.length >= 3);
+    const nameWords = (rawPath.split('/').pop() || '').slice(0, stem.length).replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().split(/[\s._-]+/).filter(word => word.length >= 3); // raw case, not stem: see graphRankCompoundName.test.js
     const other = Object.entries(node)
         .filter(([key]) => !SKIPPED_FIELDS.has(key) && !['path', 'purpose', 'exports', 'symbols', 'keywords', 'title', 'name', 'symbolRanges', 'functions', 'calls', 'reads'].includes(key))
         .map(([, v]) => (typeof v === 'string' ? v : (Array.isArray(v) ? v.filter(x => typeof x === 'string').join(' ') : ''))).join(' ').toLowerCase();

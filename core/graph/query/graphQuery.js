@@ -111,6 +111,9 @@ function bfsByDepth(graph, startId, depth, direction, minWeight, limit, resultNo
  *   - includeStale: keep stale nodes anyway, still reporting them (default false)
  * @returns {object} {nodes: [], edges: [], freshness: {excludedStaleCount, unknownTimestampCount}}
  */
+const EDGE_ORDER = ['IMPORTS', 'CALLS', 'TESTS', 'MENTIONS'];
+const edgeRank = edge => { const index = EDGE_ORDER.indexOf(edge.type); return index < 0 ? EDGE_ORDER.length : index; };
+
 export function query(graph, opts = {}) {
   const { node, outgoing, incoming, path, maxDepth, incomingDepth, outgoingDepth, filter, limit = 10, minWeight = 0, asOf, maxAgeMs, includeStale } = opts;
 
@@ -127,38 +130,23 @@ export function query(graph, opts = {}) {
   let resultNodes = new Set([startNode.id]);
   let resultEdges = [];
 
-  // Single hop: outgoing or incoming
-  if (outgoing) {
-    const edges = graph.getOutgoing(startNode.id).filter(e => e.weight >= minWeight);
-    const typeFilter = outgoing.type ? outgoing.type : null;
-
+  // Single hop: outgoing or incoming. Structural edges first (an IMPORTS edge was cut by ten CALLS edges), and the
+  // neighbours that did not fit are counted, so a cut answer says so instead of looking complete.
+  let total = 0;
+  for (const [spec, direction] of [[outgoing, 'outgoing'], [incoming, 'incoming']]) {
+    if (!spec) continue;
+    const far = direction === 'outgoing' ? 'to' : 'from';
+    const edges = (direction === 'outgoing' ? graph.getOutgoing(startNode.id) : graph.getIncoming(startNode.id))
+      .filter(edge => edge.weight >= minWeight && (!spec.type || edge.type === spec.type) && graph.getNode(edge[far]))
+      .sort((a, b) => edgeRank(a) - edgeRank(b));
+    total += new Set(edges.map(edge => edge[far])).size;
     for (const edge of edges) {
-      if (typeFilter && edge.type !== typeFilter) continue;
-      if (resultNodes.size >= limit) break;
-
-      const targetNode = graph.getNode(edge.to);
-      if (targetNode) {
-        resultNodes.add(edge.to);
-        resultEdges.push(edge);
-      }
+      if (!resultNodes.has(edge[far]) && resultNodes.size >= limit) continue;
+      resultNodes.add(edge[far]);
+      resultEdges.push(edge);
     }
   }
-
-  if (incoming) {
-    const edges = graph.getIncoming(startNode.id).filter(e => e.weight >= minWeight);
-    const typeFilter = incoming.type ? incoming.type : null;
-
-    for (const edge of edges) {
-      if (typeFilter && edge.type !== typeFilter) continue;
-      if (resultNodes.size >= limit) break;
-
-      const sourceNode = graph.getNode(edge.from);
-      if (sourceNode) {
-        resultNodes.add(edge.from);
-        resultEdges.push(edge);
-      }
-    }
-  }
+  const reachedByHop = resultNodes.size - 1;
 
   // Multi-hop: traverse path
   if (path) {
@@ -223,7 +211,8 @@ export function query(graph, opts = {}) {
   debug(2, 'graph:query',
     `Query from ${node}: ${nodes.length} nodes, ${edges.length} edges`);
 
-  return { nodes, edges, freshness: freshnessResult.freshness };
+  const hop = outgoing || incoming ? { total, truncated: total > reachedByHop } : {};
+  return { nodes, edges, freshness: freshnessResult.freshness, ...hop };
 }
 
 export { buildContextFromGraph } from './graphContext.js';

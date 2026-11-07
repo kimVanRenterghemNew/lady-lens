@@ -24,5 +24,5 @@ export {
     documentNodeId,
     resolveDocumentLink
 } from './ladybugMarkdownIndexer.js';
-export { buildConfigEntity, scriptsRun } from './configIndexer.js';
+export { buildConfigEntity, buildDependencyEntity, dependencyNodeId, scriptsRun } from './configIndexer.js';
 export { createLadybugRepositoryStore, openWithLockRetry, rowToNode } from './repositoryStore.js';

@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
-import { createLadyLensMcpServer } from '../core/mcp/index.js';
+import { buildMcpToolSchemas, createLadyLensMcpServer } from '../core/mcp/index.js';
 
 describe('MCP server for lady-lens', () => {
+    it('declares items for every array-valued tool parameter', () => {
+        const missing = [];
+        const visit = (value, path = 'schema') => {
+            if (!value || typeof value !== 'object') return;
+            if (value.type === 'array' && !Object.hasOwn(value, 'items')) missing.push(path);
+            for (const [key, child] of Object.entries(value)) visit(child, `${path}.${key}`);
+        };
+        visit(buildMcpToolSchemas());
+        expect(missing).toEqual([]);
+    });
+
     it('serves research and repo tools over MCP transport', async () => {
         const server = createLadyLensMcpServer({ defaultRepo: process.cwd() });
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -42,6 +53,9 @@ describe('MCP server for lady-lens', () => {
         // Check inputSchema has repo property
         const grepSchema = tools.find(t => t.name === 'grep');
         expect(grepSchema.inputSchema.properties.repo).toBeDefined();
+        // a client can tell reading tools from writing ones (MCP readOnlyHint)
+        const readOnly = Object.fromEntries(tools.map(t => [t.name, t.annotations?.readOnlyHint]));
+        expect(readOnly).toMatchObject({ grep: true, graph_query: true, discussion_query: true, discussion_save: false, discussion_edit: false, repo_sync: false, config_update: false, branch_diff: true });
 
         // 2. Call discussion_build
         const buildResult = await client.callTool({

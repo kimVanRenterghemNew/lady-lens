@@ -5,7 +5,7 @@ import path from 'path';
 
 /** Per worker AND per process: nothing is shared with an earlier run. */
 export function workerTempFiles({ tmp = os.tmpdir(), worker = process.env.VITEST_WORKER_ID || 0, pid = process.pid } = {}) {
-    return { graph: path.join(tmp, `lens-test-graph-${worker}-${pid}.lbdb`) };
+    return { graph: path.join(tmp, `lens-test-graph-${worker}-${pid}.lbdb`), home: path.join(tmp, `lens-test-home-${worker}-${pid}`) };
 }
 
 /** Removes the files (a Ladybug database may come with .wal/.shadow files, or be a folder). Never throws. */

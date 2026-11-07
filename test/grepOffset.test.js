@@ -28,6 +28,17 @@ describe('grep offset', () => {
     });
 });
 
+describe('grep binary files', () => {
+    it('MUST skip binary files (a Mendix .mpr or catalog.db) and keep the readable copy of their text', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-grep-binary-'));
+        try {
+            fs.writeFileSync(path.join(dir, 'App.mpr'), Buffer.from("FilterType: 'startsWith'\0\x01"));
+            fs.writeFileSync(path.join(dir, 'Page.page.mdl'), "FilterType: 'startsWith'\n");
+            expect(grep({ pattern: 'startsWith' }, { root: dir }).matches.map(m => m.file)).toEqual(['Page.page.mdl']);
+        } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    });
+});
+
 describe('grep ignoreCase', () => {
     it('MUST find every spelling with ignoreCase (VS Code found 31 where a case-sensitive search found 24)', () => {
         const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-grep-case-'));

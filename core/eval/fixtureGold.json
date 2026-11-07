@@ -14,7 +14,9 @@
     "test/auth/login.test.js": "import { handleLogin } from '../../src/auth/login.js';\ntest('login', () => handleLogin({ code: 'x' }));\n",
     "test/queue/jobQueue.test.js": "import { JobQueue } from '../../src/queue/jobQueue.js';\ntest('queue', () => new JobQueue());\n",
     "src/report/salesSummary.js": "/**\n * Sales summary.\n */\nexport function buildSalesSummary(rows) { return rows.length; }\n",
-    "test/report/salesSummary.test.js": "/**\n * Tests the monthly sales summary report.\n */\nimport { buildSalesSummary } from '../../src/report/salesSummary.js';\ntest('report', () => buildSalesSummary([]));\n"
+    "test/report/salesSummary.test.js": "/**\n * Tests the monthly sales summary report.\n */\nimport { buildSalesSummary } from '../../src/report/salesSummary.js';\ntest('report', () => buildSalesSummary([]));\n",
+    "src/session/sessionState.js": "/**\n * Reads and writes the state of a session on disk.\n */\nexport function readSessionState(id) { return { id }; }\nexport function updateSessionState(id, patch) { return { id, ...patch }; }\n",
+    "src/knowledge/index.js": "/**\n * Knowledge stored in and read from the graph.\n */\nexport function saveKnowledge(item) { return item; }\nexport function persistSessionGraph(session) { return session; }\nexport function createKnowledgeStore() { return {}; }\n"
   },
   "queries": [
     {
@@ -64,6 +66,13 @@
       "query": "where are the tests for login",
       "expected": [
         "test/auth/login.test.js"
+      ]
+    },
+    {
+      "id": "fx-compound-name-nl",
+      "query": "bewaar de sessie status",
+      "expected": [
+        "src/session/sessionState.js"
       ]
     },
     {

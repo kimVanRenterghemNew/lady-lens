@@ -29,12 +29,49 @@ function testNames(text, symbol) {
     return cases.filter((match, i) => linesWith(String(text).slice(match.index, cases[i + 1]?.index), symbol).length).map(match => match[2]);
 }
 
+/** Parsed call sites named `symbol` in files that do not reach the definition: another function with that name, or unbound. */
+function callsElsewhere(graph, symbol, reaching, idToPath) {
+    let count = 0;
+    for (const node of graph.nodes.values()) {
+        const path = node.path ?? idToPath.get(node.id);
+        if (Array.isArray(node.calls) && !reaching.has(path)) count += node.calls.filter(call => call[1] === symbol).length;
+    }
+    return count;
+}
+
+/** Bound call sites against places that only name X; no bound caller while names exist is not proof that nobody calls X. */
+function bindingCounts(resolved, unresolved) {
+    return { resolved, unresolved, ...(resolved === 0 && unresolved > 0 ? { note: `niet bewezen leeg: ${unresolved} plaats(en) noemen de naam zonder gebonden aanroep (dynamisch, of een andere functie met die naam)` } : {}) };
+}
+
+/** For a class: the functions inside its lines (`children`) and the classes that extend it (`inheritors`); nothing for a function. */
+function classShape(definitions, symbol, paths, factsOf) {
+    const children = definitions.filter(location => Number.isInteger(location.startLine)).flatMap(({ path, startLine, endLine }) => {
+        const file = factsOf(path);
+        const functions = file == null ? [] : (Array.isArray(file.functions) ? file.functions : analyzeFile(file.text, path).functions || []);
+        // acorn gives `loc`, the other language parsers `startLine`/`endLine`
+        const lines = fn => fn.loc || [fn.startLine, fn.endLine];
+        return functions.filter(fn => fn.name !== symbol && lines(fn)[0] > startLine && lines(fn)[1] <= endLine).map(fn => ({ name: fn.name, path, line: lines(fn)[0] }));
+    });
+    // JS/TS/Java `extends X`, C# `: X`, Python `(X)`
+    const extendsX = new RegExp(String.raw`\bclass\s+([\w$]+)[^{\n]*?(?:extends|:|\()\s*(?:[\w$]+\.)*` + symbol.replace(/[$]/g, '\\$') + String.raw`(?![\w$])`, 'g');
+    const inheritors = paths.flatMap(path => {
+        const text = factsOf(path)?.text ?? '';
+        return [...text.matchAll(extendsX)].filter(match => match[1] !== symbol).map(match => ({ name: match[1], path, line: text.slice(0, match.index).split('\n').length }));
+    });
+    return { ...(children.length ? { children } : {}), ...(inheritors.length ? { inheritors } : {}) };
+}
+
+const analyzeFile = (text, path) => (/\.[cm]?jsx?$/i.test(path) ?analyzeSource(text) : analyzeSourceForLanguage(text, path));
+
 /**
  * @param {Object} graph - graph model (nodes Map, edges array)
  * @param {string} symbol
- * @param {{readFile: (path: string) => string|null}} deps - repo-relative read; null when unreadable
+ * @param {{readFile: (path: string) => string|null, maxSites?: number}} deps - repo-relative read (null when unreadable);
+ *   `maxSites`: lines per caller, test and story (default 5, at most 200)
  */
-export function functionView(graph, symbol, { readFile }) {
+export function functionView(graph, symbol, { readFile, maxSites = MAX_LINES }) {
+    const max = Math.max(1, Math.min(Number(maxSites) || MAX_LINES, 200));
     const empty = { symbol, found: false, definitions: [], calls: [], callers: [], tests: [], stories: [] };
     const located = definedIn(graph, symbol).locations;
     const ranged = located.filter(location => Number.isInteger(location.startLine));
@@ -60,6 +97,7 @@ export function functionView(graph, symbol, { readFile }) {
                     text,
                     calls: node.calls,
                     symbolRanges: node.symbolRanges || {},
+                    ...(Array.isArray(node.functions) ? { functions: node.functions } : {}),
                     parseError: node.parseError || null
                 });
             } else {
@@ -90,6 +128,7 @@ export function functionView(graph, symbol, { readFile }) {
     }
 
     const callers = [], tests = [];
+    let resolved = 0, unresolved = 0;
     for (const path of [...new Set([...defPaths, ...users])].sort()) {
         const file = factsOf(path);
         if (file == null) continue;
@@ -99,9 +138,11 @@ export function functionView(graph, symbol, { readFile }) {
         const isTest = isTestNode(byPath.get(path) ?? { path });
         let entry;
         const functions = [...new Set(sites.map(call => call[0]).filter(Boolean))];
-        if (sites.length) entry = { path, lines: [...new Set(sites.map(call => call[2]))].slice(0, MAX_LINES), ...(functions.length ? { functions } : {}) };
+        resolved += sites.length;
+        if (sites.length) entry = { path, lines: [...new Set(sites.map(call => call[2]))].slice(0, max), ...(functions.length ? { functions } : {}) };
         else if (defPaths.includes(path) || !named.length || file.symbolRanges?.[symbol]) continue;   // its own X is another function
-        else entry = { path, lines: named.slice(0, MAX_LINES), ...(file.parseError ? {} : { reference: true }) };
+        else entry = { path, lines: named.slice(0, max), ...(file.parseError ? {} : { reference: true }) };
+        if (!sites.length) unresolved += named.length;
         if (isTest) tests.push({ ...entry, names: testNames(file.text, symbol) });
         else callers.push(entry);
     }
@@ -112,7 +153,7 @@ export function functionView(graph, symbol, { readFile }) {
         .filter(node => node.type === 'Document' && typeof node.path === 'string' && (!mentions.length || mentioning.has(node.path)))
         .map(node => ({ path: node.path, text: readFile(node.path) }))
         .filter(doc => doc.text != null && (linesWith(doc.text, symbol).length || defPaths.some(path => doc.text.includes(path))))
-        .map(doc => ({ path: doc.path, lines: linesWith(doc.text, symbol).slice(0, MAX_LINES) }))
+        .map(doc => ({ path: doc.path, lines: linesWith(doc.text, symbol).slice(0, max) }))
         .sort((a, b) => a.path.localeCompare(b.path));
 
     const discussions = [...graph.nodes.values()]
@@ -125,8 +166,10 @@ export function functionView(graph, symbol, { readFile }) {
     return {
         symbol, found: true,
         definitions: definitions.map(location => ({ ...location, purpose: byPath.get(location.path)?.purpose ?? null })),
-        calls: [...callees.values()].map(({ at, ...callee }) => ({ ...callee, at: at.slice(0, MAX_LINES) })),
+        calls: [...callees.values()].map(({ at, ...callee }) => ({ ...callee, at: at.slice(0, max) })),
         callers, tests, stories,
+        ...bindingCounts(resolved, unresolved + callsElsewhere(graph, symbol, new Set([...defPaths, ...users]), idToPath)),
+        ...classShape(definitions, symbol, [...new Set([...defPaths, ...users])], factsOf),
         ...(discussions.length ? { discussions } : {})
     };
 }

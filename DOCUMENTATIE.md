@@ -1,62 +1,150 @@
-# lady-lens Documentatie
+# lady-lens documentation
 
-Uitgebreide gids voor architectuur, API-poorten, MCP-integratie, npm package gebruik en configuratie via `config.json`.
-
----
-
-## 1. Architectuuroverzicht & Filosofie
-
-`lady-lens` is een snelle, lokale code-graaf en semantische analyse-engine gebouwd op [LadybugDB](https://www.npmjs.com/package/@ladybugdb/core). Het indexeert broncode, documentatie, besluiten en afhankelijkheden in een gerichte graaf. Hierdoor kunnen AI coding agents en ontwikkelaars direct exacte feiten over de codebase opvragen (zoals definities, import-ketens, callers, test reach, code health en architecture metrics) zonder dat er dure LLM-tokens aan context verloren gaan.
-
-De codebase is opgebouwd volgens een strikte **hexagonale architectuur (Ports & Adapters)**:
-- **Core Domain / Model**: Grafen, nodes (bestanden, functies, documenten, besluiten) en edges (`IMPORTS`, `CALLS`, `TESTS`, `READS`, `CO_CHANGES`).
-- **Storage Port (`GraphStorePort`)**: Uitwisselbare opslagadapters (in-memory voor snelle tests, LadybugDB voor persistente indexering).
-- **Sync & Extraction Port**: Incrementele parsing en AST-extractie voor JavaScript/TypeScript en C#.
-- **Query & View Ports**: `functionView`, `folderView`, `codeHealth`, `rankGraphNodes`, `impact`.
-- **Primary Adapters**: Zowel toegankelijk via het **npm package** als via de **MCP Server (Model Context Protocol)** en de **CLI (`lens`)**.
+Full guide to architecture, API ports, MCP integration, npm package use and configuration through `config.json`. (The file name stays `DOCUMENTATIE.md` so existing links keep working.)
 
 ---
 
-## 2. API-Poorten: Toegang via MCP en NPM Package
+## 0. Installation and setup
 
-Alle functionaliteiten van `lady-lens` zijn ontworpen als **first-class API-poorten**. Elke poort is zowel programmatisch via het npm package (`lady-lens`) als interactief via het Model Context Protocol (MCP) beschikbaar.
+Requires Node.js 18 or newer. `lady-lens` is not on npmjs.org; install it from a package you build yourself. Do these steps once, in order.
 
-### Overzicht van alle Poorten
+**Step 1: install**
 
-| Poort / Domein | MCP Tool Naam | NPM Package Export (`lady-lens`) | Beschrijving |
+```bash
+cd C:\git\lady-lens
+npm install                       # dependencies of lady-lens itself
+npm run pack                      # builds dist\lady-lens-<version>.tgz
+npm install -g .\dist\lady-lens-<version>.tgz
+lens v                            # prints the version: `lens` is now on your PATH
+```
+
+For development you can use `npm link` instead of the last install step; `lens` then runs straight from this folder.
+
+**Step 2: register a project and index it**
+
+```bash
+lens add C:\git\my-project        # registers the project and runs the first sync
+lens list                         # check that it is listed
+lens sync                         # later: incremental sync (--full = everything)
+```
+
+**Step 3: connect your AI assistant (stdio, no daemon needed)**
+
+```bash
+lens install                      # every agent found; or one: lens install vscode
+lens install --skill              # also the Lady-lens workflow skill
+lens install --dry-run            # shows what would change, writes nothing
+```
+
+`lens install` adds a stdio entry to each agent's MCP configuration (VS Code: `%APPDATA%\Code\User\mcp.json`), keeps the other servers and saves the old file as `<file>.lady-lens.bak`. Restart the agent afterwards (VS Code: *MCP: List Servers* or reload the window).
+
+**Step 4 (alternative): one background daemon for all projects**
+
+```bash
+lens mcp -d                       # MCP on http://127.0.0.1:4318/mcp, UI on http://127.0.0.1:4317
+lens status                       # is it running?
+lens ps                           # tracked PIDs per folder
+lens stop                         # stop it
+```
+
+Example for VS Code (`mcp.json`):
+
+```json
+{ "servers": { "lady-lens": { "type": "http", "url": "http://127.0.0.1:4318/mcp?repo=C:/git/my-project" } } }
+```
+
+See [section 5](#5-using-it-as-an-mcp-server) for several projects per daemon and other agents.
+
+**Step 5: update**
+
+One command stops lens, installs the newest package from `dist` and starts the daemon again:
+
+```powershell
+.\scripts\update-lens.ps1 -Pack   # first build a fresh package from this source
+.\scripts\update-lens.ps1         # only install the newest package already in dist
+.\scripts\update-lens.ps1 -Source github:kimVanRenterghemNew/lady-lens   # another source
+```
+
+The script only restarts the daemon when the install succeeded. Restart the MCP server in your agent afterwards so new or changed tools show up.
+
+---
+
+## 1. Architecture overview and philosophy
+
+`lady-lens` is a fast, local code graph and semantic analysis engine built on [LadybugDB](https://www.npmjs.com/package/@ladybugdb/core). It indexes source code, documentation, decisions and dependencies into a directed graph. AI coding agents and developers can ask for exact facts about the codebase (definitions, import chains, callers, test reach, code health and architecture metrics) without spending expensive LLM tokens on context.
+
+The code base follows a strict **hexagonal architecture (ports and adapters)**:
+- **Core domain / model**: graphs, nodes (files, functions, documents, decisions) and edges (`IMPORTS`, `CALLS`, `TESTS`, `READS`, `CO_CHANGES`).
+- **Storage port (`GraphStorePort`)**: interchangeable storage adapters (in memory for fast tests, LadybugDB for persistent indexing).
+- **Sync and extraction port**: incremental parsing and AST extraction for JavaScript/TypeScript, C# and other registered languages; Mendix `.mpr` models are handled through `mxcli` as an external graph contributor.
+- **Git port (`core/git`)**: the only place that starts git; see [Branches and commits](#branches-and-commits).
+- **Query and view ports**: `functionView`, `folderView`, `codeHealth`, `rankGraphNodes`, `impact`.
+- **Primary adapters**: reachable through the **npm package**, the **MCP server (Model Context Protocol)** and the **CLI (`lens`)**.
+
+---
+
+## 2. API ports: access through MCP and the npm package
+
+Every feature of `lady-lens` is a **first-class API port**, available programmatically through the npm package (`lady-lens`) and interactively through the Model Context Protocol (MCP).
+
+The library sync API is `createGraphSync().sync({ mode: 'incremental' })`; use `mode: 'full'` for a complete re-index.
+
+### Overview of all ports
+
+| Port / domain | MCP tool | npm export (`lady-lens`) | Description |
 | :--- | :--- | :--- | :--- |
-| **Functie Analyse** | `functionView` | `functionView(graph, symbol)` / `functionViewTool(args)` | Geeft de definitie, regelnummers, docstring/purpose, alle aanroepende bestanden (`callers`), gekoppelde tests en gerefereerde backlog stories van een functie. |
-| **Map & Module Analyse** | `folderView` | `folderView(graph, folder)` / `folderViewTool(args)` | Analyseert de structuur van een map: onderliggende onderdelen, interne datastroom, wie de map van buitenaf aanroept en potentiële afwijkingen (cycli, ongeteste bestanden). |
-| **Code Health & Metrics** | `health` | `codeHealth(graph, opts)` / `healthTool(args)` | Berekent NDepend-achtige statistieken: testbereik (inclusief index.js barrels), cyclische afhankelijkheden, grens-overtredingen, hotspots (churn x regels), coupling (Ca, Ce, Instability) en zone of pain. |
-| **Symbool Locatie** | `definedIn` | `definedIn(graph, symbol)` / `definedInTool(args)` | Waar is een identifier gedefinieerd of geëxporteerd? Retourneert het bestandspad en de exacte start/eindregels. |
-| **Imports Zoeken** | `imports` | `importsOf(graph, file)` / `imports(args)` | Welke bestanden en modules worden direct geïmporteerd door een opgegeven bestand. |
-| **Afhankelijkheden** | `importedBy` | `importersOf(graph, file)` / `importedBy(args)` | Welke bestanden importeren het opgegeven bestand (fan-in analyse). |
-| **Exports Inspectie** | `exports` | `exportsOf(graph, file)` / `exportsTool(args)` | Volledige gesorteerde lijst van geëxporteerde functies, variabelen en types uit een bestand. |
-| **Bestandsverificatie** | `exists` | `fileLookup(graph, file)` / `fileExists(args)` | Controleert of een bestand in de projectgraaf bestaat; geeft suggesties bij typefouten of verplaatste mappen. |
-| **Graaf Zoeken** | `graph_query` | `graph_query(args)` / `rankGraphNodes(graph, query)` | Semantisch en trefwoord-gebaseerd zoeken door de graaf op basis van relevantiescore, IDF-weging en relaties. |
-| **Interactiviteit** | `searchView` | `searchView(args)` | Geavanceerd zoeken met regex, hoofdlettergevoeligheid, filtering op bestandstype (code, doc, test) en padglobs. |
-| **Tekst & Regex** | `grep` | `grep(args)` | Snelle regex-zoekopdracht door code, rekening houdend met `.gitignore` en project-exclusies. |
-| **Pad Matching** | `glob` | `glob(args)` | Vindt repository-paden op basis van glob-patronen (bijv. `core/**/*.js`). |
-| **AST Chunk Lezer** | `read_chunk` | `read_chunk(args)` | Leest een specifiek AST-chunk (klasse/functie) of een bereik regels. Grote bestanden leveren een compacte samenvatting op. |
-| **Besluiten & Discussies** | `discussion_save`, `discussion_query`, etc. | `saveDiscussion`, `loadDiscussions`, `queryDiscussions` | Beheert architectuurbesluiten en discussies met frontmatter-koppelingen naar code-nodes. |
-| **Multi-Repo Beheer** | `repo_list`, `repo_add`, `repo_remove`, `repo_sync` | `registerRepo`, `unregisterRepo`, `listRegisteredRepos` | Beheert meerdere projecten in de centrale Ladybug-database registry. |
-| **Graaf Synchronisatie** | `repo_sync` | `createGraphSync(options).sync()` | Scant het project incrementeel (op basis van bestandshash/mtime) of volledig (`mode: 'full'`). |
+| **Function analysis** | `functionView` | `functionView(graph, symbol, { readFile, maxSites })` / `functionViewTool(args)` | Definition, line numbers, docstring/purpose, all calling files (`callers`), linked tests and referenced backlog stories of a function; `resolved` and `unresolved` call counts (a `note` "niet bewezen leeg" when none is bound but the name appears); for a class `children` (methods) and `inheritors` (subclasses). |
+| **Folder and module analysis** | `folderView` | `folderView(graph, folder)` / `folderViewTool(args)` | Structure of a folder: parts, internal data flow, who calls the folder from outside and possible deviations (cycles, untested files). |
+| **Code health and metrics** | `health` | `codeHealth(graph, opts)` / `healthTool(args)` | NDepend-style statistics: test reach (including index.js barrels), cyclic dependencies, boundary violations, hotspots (churn x lines), coupling (Ca, Ce, instability) and zone of pain. On request `hubs` (most neighbours) and `bridges` (betweenness), each with `total` and `truncated` (`hubsAndBridges(graph, opts)`). |
+| **Symbol location** | `definedIn` | `definedIn(graph, symbol)` / `definedInTool(args)` | Where an identifier is defined or exported: file path and exact start/end lines. |
+| **Imports** | `imports` | `importsOf(graph, file)` / `imports(args)` | Which files and modules a given file imports directly. |
+| **Dependents** | `importedBy` | `importersOf(graph, file)` / `importedBy(args)` | Which files import the given file (fan-in analysis). |
+| **Exports** | `exports` | `exportsOf(graph, file)` / `exportsTool(args)` | Complete sorted list of exported functions, variables and types of a file. |
+| **File check** | `exists` | `fileLookup(graph, file)` / `fileExists(args)` | Checks whether a file is in the project graph; suggests matches for typos or moved folders. |
+| **Graph search** | `graph_query` | `graph_query(args)` / `rankGraphNodes(graph, query)` | Semantic and keyword search through the graph by relevance score, IDF weighting and relations. |
+| **Interactive search** | `searchView` | `searchView(args)` | Advanced search with regex, case sensitivity, file type filter (code, doc, test) and path globs. |
+| **Text and regex** | `grep` | `grep(args)` | Fast regex search through code, honouring `.gitignore` and project exclusions. |
+| **Config search** | `config_grep` | `grep(args)` + config filter | Searches only project and configuration files, such as `.csproj` and reference-manager XML. |
+| **Config references** | `config_references` | `grep(args)` + config filter | Finds which config files mention a package, project or Siemens functional block. |
+| **Config update** | `config_update` | `fs` + `createGraphSync().touch()` | Replaces one config file, optionally checks a SHA-256 and refreshes the graph facts. |
+| **Path matching** | `glob` | `glob(args)` | Finds repository paths by glob pattern (e.g. `core/**/*.js`). |
+| **AST chunk reader** | `read_chunk` | `read_chunk(args)` | Reads one AST chunk (class/function) or a range of lines. Large files return a compact summary. |
+| **Decisions and discussions** | `discussion_save`, `discussion_query`, etc. | `saveDiscussion`, `loadDiscussions`, `queryDiscussions` | Manages architecture decisions and discussions, with frontmatter links to code nodes. |
+| **Multi-repo management** | `repo_list`, `repo_add`, `repo_remove` | `registerRepo`, `unregisterRepo`, `listRegisteredRepos` | Manages several projects in the central Ladybug database registry. |
+| **Graph sync** | `repo_sync` | `createGraphSync(options).sync()` | Scans the project incrementally (by size and mtime) or fully (`mode: 'full'`). Records the branch and commit and reports `commitsSince`. With `branch: '<name>'` another branch is indexed into the scope `branch:<name>` without checking it out. |
+| **Branch difference** | `branch_diff` | `branchDiff({ from, to, root })` | What `to` changes since its merge-base with `from`: files (added, removed, modified, renamed) and functions (added, removed, modified, renamed) and changed import and call relations. |
+| **Diff impact** | `diff_impact` | `diffImpact(args)` / `changedFunctions({ from, to, git, readFile })` | The functions a diff changes (the work not committed yet, or `from`..`to`) with callers, tests, bound/unbound call counts, complexity and test gaps; riskiest first, with `total` and `truncated`. |
+| **Search over projects** | `cross_repo_search` | `crossRepoSearch(args)` | `searchView` over every registered project or `repos: [...]`, project after project; unregistered names in `unknown`. |
+| **Tool metadata** | (all tools) | `RESEARCH_TOOL_SCHEMAS`, `buildMcpToolSchemas()` | Every schema has `readOnly` (MCP `annotations.readOnlyHint`); the discussion tools carry `usedBy: ['/discuss', '/research']` so a host such as Kura gives them only to those consumers. |
+| **Branch impact** | `branch_impact` | `branchImpact({ change, against, root })` | What a change on one branch (e.g. a bugfix on `release`) means for another: functions still used there (file and line), overlap, shared files and text merge conflicts. |
+| **Commit inspection** | `commit_show` | `commitShow({ commit, root })` | What one commit changed (files and functions against its first parent); for a merge commit, what the merge brought in. |
+| **Function history** | `function_history` | `functionHistory({ name, file, ref, max, root })` | Commits that added, modified or removed one function; without `name` every commit that touched the file. Name based: a renamed function starts a new history. |
+
+### Branches and commits
+
+The graph knows which branch and commit it was built on:
+
+- After every sync a `Branch` node points to its `Commit` (`HEAD_AT`). `repo_sync` reports how many commits came in since the previous sync on that branch. A commit that changed no file is recorded too.
+- A saved discussion gets `CREATED_AT` (commit) and `ON_BRANCH` (branch). If you switch to a branch where the source file does not exist, the discussion stays; `discussion_query` shows the source as "not on this branch" and on which branch the file does exist. Switching back and syncing restores the link by itself.
+- `repo_sync({ branch: 'feature-x' })` reads that branch with `git ls-tree` and `git cat-file --batch` into its own scope `branch:feature-x`. The working copy, `HEAD` and the project scope stay unchanged. A second call only reads what changed since the stored commit. This scope has no Mendix contributions and no co-change signal.
+- `branch_diff`, `branch_impact`, `commit_show` and `function_history` read git directly and check nothing out. Functions are compared by name and content (hash of the body); a function whose name changed but whose body is alike (same file, or a renamed file) shows as `renamed` with `oldName`, and `branch_diff` also lists added and removed import and call relations (`relations`). `branch_impact` finds callers with `git grep` (at most 20 references per function; for a renamed function it searches the old name) and uses `git merge-tree --write-tree` (git 2.38 or newer) for conflicts.
+- All git calls go through `core/git` (`createGit({ root, run })`); a test checks that git is started nowhere else. `createFakeGit(state)` is an in-memory git for tests; `test/gitPort.contract.test.js` runs the same scenario on both and compares the answers.
 
 ---
 
-## 3. Configuratie via `config.json`
+## 3. Configuration through `config.json`
 
-Alle instellingen van `lady-lens` kunnen worden geconfigureerd via een centraal **`config.json`** bestand in de hoofdmap van het project.
+All `lady-lens` settings can be set in one central **`config.json`** file in the root of the project.
 
-### Automatische Detectie
-`lady-lens` controleert automatisch op configuratiebestanden in de volgende volgorde:
-1. Bestand opgegeven via `--config <pad>` of de omgevingsvariabele `LENS_SETTINGS_PATH`.
-2. `config.json` (aanbevolen standaard)
+### Automatic detection
+`lady-lens` looks for configuration files in this order:
+1. A file given with `--config <path>` or the environment variable `LENS_SETTINGS_PATH`.
+2. `config.json` (recommended default)
 3. `lens.config.json`
 4. `.lady-lens.json`
 5. `.lady-lens.yaml`
 
-### Volledig Voorbeeld van `config.json`
+### Complete example of `config.json`
 
 ```json
 {
@@ -121,38 +209,38 @@ Alle instellingen van `lady-lens` kunnen worden geconfigureerd via een centraal 
 }
 ```
 
-### Configuratie-secties Uitgelegd
+### Configuration sections
 
 1. **`project`**:
-   - `graph_roots`: Mappen die geïndexeerd moeten worden (standaard `["."]`).
-   - `exclude_dirs`: Mappen die genegeerd worden tijdens sync, glob en grep.
-   - `graph_extensions`: Bestandsextensies die meegenomen worden in de code-graaf.
+   - `graph_roots`: folders to index (default `["."]`).
+   - `exclude_dirs`: folders ignored during sync, glob and grep.
+   - `graph_extensions`: file extensions included in the code graph.
 2. **`graph`**:
-   - `ast.enabled`: Genereer AST-chunks en symbooldefinities.
-   - `documentation.enabled`: Indexeer markdown documenten en koppel frontmatter.
-   - `links.enabled`: Automatisch koppelen van import- en call-relaties.
-   - `freshness.default_max_age_days`: Maximale leeftijd voor automatische re-indexering.
+   - `ast.enabled`: generate AST chunks and symbol definitions.
+   - `documentation.enabled`: index markdown documents and link frontmatter.
+   - `links.enabled`: link import and call relations automatically.
+   - `freshness.default_max_age_days`: maximum age before automatic re-indexing.
 3. **`mcp`**:
-   - `port`: HTTP/SSE poort voor de MCP server (standaard `4318`).
-   - `uiPort`: Web UI dashboard poort (standaard `4317`).
+   - `port`: HTTP/SSE port of the MCP server (default `4318`).
+   - `uiPort`: web UI dashboard port (default `4317`).
 4. **`database`**:
-   - Pad naar het LadybugDB databasebestand. Als dit niet is ingesteld, gebruikt lens `~/.lady-lens/repos/<id>/graph.lbdb`.
+   - Path to the LadybugDB database file. If not set, lens uses `~/.lady-lens/repos/<id>/graph.lbdb`.
 5. **`env`**:
-   - Directe toewijzing van lens omgevingsvariabelen (zoals `TOOL_RESULT_CHARS`, `DEBUG_LEVEL`, etc.).
+   - Sets lens environment variables directly (such as `TOOL_RESULT_CHARS`, `DEBUG_LEVEL`).
 
 ---
 
-## 4. Gebruik als NPM Package
+## 4. Using it as an npm package
 
-Installeer de package lokaal of als dependency:
+Install the package locally or as a dependency (see [section 0](#0-installation-and-setup); it is not on npmjs.org, so install the `.tgz` from `dist`):
 
 ```bash
-npm install lady-lens
+npm install ..\lady-lens\dist\lady-lens-<version>.tgz
 ```
 
-### Directe Imports (Hoofdingang)
+### Direct imports (main entry)
 
-Alle poorten zijn direct beschikbaar vanuit de root export:
+Every port is available from the root export:
 
 ```javascript
 import {
@@ -169,29 +257,29 @@ import {
     loadProjectSettingsSync
 } from 'lady-lens';
 
-// 1. Instellingen inlezen (leest automatisch config.json)
+// 1. Read the settings (reads config.json automatically)
 const settings = loadProjectSettingsSync();
 
-// 2. Incrementele sync van de repository
+// 2. Incremental sync of the repository
 const syncResult = await createGraphSync().sync({ mode: 'incremental' });
-console.log(`Graaf gesynchroniseerd: ${syncResult.nodes} nodes`);
+console.log(`Graph synced: ${syncResult.nodes} nodes`);
 
-// 3. Functie view opvragen
+// 3. Ask for a function view
 const fnDetails = await functionViewTool({ symbol: 'createGraphSync' });
-console.log('Callers van createGraphSync:', fnDetails.callers);
+console.log('Callers of createGraphSync:', fnDetails.callers);
 
-// 4. Code health inspecteren
+// 4. Inspect code health
 const health = await healthTool({ limit: 5 });
 console.log('Top hotspots:', health.hotspots);
 
-// 5. Semantische graaf query
+// 5. Semantic graph query
 const queryResult = await graph_query({ query: 'database storage' });
-console.log('Gevonden nodes:', queryResult.nodes);
+console.log('Nodes found:', queryResult.nodes);
 ```
 
-### Modulaire Subpath Imports
+### Modular subpath imports
 
-Voor gespecialiseerde scenario's zijn ook specifieke subpath imports beschikbaar:
+Specialised scenarios can use subpath imports:
 
 ```javascript
 import { createGraph, createGraphRepository } from 'lady-lens/graph';
@@ -203,34 +291,84 @@ import { createProfiler, globalProfiler } from 'lady-lens/observability';
 
 ---
 
-## 5. Gebruik als MCP Server
+## 5. Using it as an MCP server
 
-Start de achtergrondservice met de CLI:
+Start the background service with the CLI:
 
 ```bash
 lens mcp -d
 ```
 
-Dit start:
-- De **MCP SSE Server** op `http://127.0.0.1:4318/sse`
-- Het **UI Dashboard** op `http://127.0.0.1:4317`
+This starts:
+- The **Streamable HTTP MCP server** on `http://127.0.0.1:4318/mcp`
+- The legacy **SSE MCP server** on `http://127.0.0.1:4318/sse`
+- The **UI dashboard** on `http://127.0.0.1:4317`
 
-### AI Assistent Configuratie
+### AI assistant configuration
 
-Voeg de server toe aan uw MCP-configuratiebestand (bijvoorbeeld in Antigravity, Claude Desktop, Cursor of VS Code):
+Add the server to your MCP configuration file (for example in Antigravity, Claude Desktop, Cursor or VS Code):
 
-#### HTTP/SSE Mode (Aanbevolen)
+#### Streamable HTTP mode (recommended)
 ```json
 {
   "mcpServers": {
     "lady-lens": {
-      "url": "http://127.0.0.1:4318/sse"
+      "url": "http://127.0.0.1:4318/mcp"
     }
   }
 }
 ```
 
-#### Directe Stdio Mode
+Use `/sse` only for older clients that do not support Streamable HTTP.
+
+### Configuration files through MCP
+
+No extra setting in `config.json` is needed. The agent uses these tools:
+
+```json
+{
+  "name": "config_references",
+  "arguments": { "reference": "PUREQU_OP" }
+}
+```
+
+This returns, among other things, `referenceManager.xml`, the line number and the matching text. Use `config_references` for this, not `imports` or `importedBy`.
+
+Read the file before changing it. Then pass the complete new content to `config_update`. Use the SHA-256 of the content you read as `expectedHash`; a stale update is refused.
+
+```json
+{
+  "name": "config_update",
+  "arguments": {
+    "path": "App/App.csproj",
+    "content": "<Project>...</Project>",
+    "expectedHash": "<sha256>"
+  }
+}
+```
+
+Supported: `.csproj`, `.sln`, `.props`, `.targets`, `.xml`, `.ini`, `.yaml`, `.yml`, `.toml` and `package.json`. After an update an incremental graph sync runs.
+
+### Agent instruction
+
+Use this text in the agent chat:
+
+> Use Lady Lens MCP. First pick the right repo with `repo` or register it with `lens add`. Use `config_references` for questions like: who references `PUREQU_OP`? Do not use `imports` or `importedBy`. Then read the config files found. Use `config_update` with the complete new content and `expectedHash`. Do not write directly outside `config_update`.
+
+#### One daemon, several projects
+One daemon serves every registered project (`lens add <folder>`). Pick the project per client in the URL:
+
+```json
+{ "mcpServers": { "lady-lens": { "url": "http://127.0.0.1:4318/mcp?repo=C:/git/my-project" } } }
+```
+
+- `repo` is a registered folder or id; the `X-Lens-Repo` header works too.
+- An unregistered repo is refused (HTTP 403): run `lens add <folder>` first.
+- Without `repo` the folder where `lens mcp -d` was started applies; a tool call can override that with its `repo` argument.
+- Tool calls run one after another, so simultaneous requests for different projects do not affect each other.
+- The UI dashboard that starts with `lens mcp -d` works the same way: `http://127.0.0.1:4317/?repo=<folder or id>` shows that project (not registered: HTTP 403); with more than one registered project a dropdown appears.
+
+#### Direct stdio mode
 ```json
 {
   "mcpServers": {
@@ -244,18 +382,27 @@ Voeg de server toe aan uw MCP-configuratiebestand (bijvoorbeeld in Antigravity, 
 
 ---
 
-## 6. CLI Command Referentie
+## 6. CLI command reference
 
-De command line interface `lens` biedt directe toegang tot alle functionaliteiten:
+The command line interface `lens` gives direct access to every feature:
 
-| Commando | Beschrijving |
+| Command | Description |
 | :--- | :--- |
-| `lens sync [--repo <dir>] [--full]` | Synchroniseer de graaf voor het huidige project of een doelmap. |
-| `lens ask <tool> '<json>'` | Roep direct een van de research tools aan (bijv. `lens ask functionView '{"symbol":"createProfiler"}'`). |
-| `lens mcp [-d]` | Start de MCP server (optioneel op de achtergrond met `-d`). |
-| `lens stop` | Beëindig de achtergronddaemon en vrijgave van poorten/locks. |
-| `lens ui [--port 4317]` | Start de interactieve graaf-visualisatie in de browser. |
-| `lens list` | Overzicht van alle geregistreerde repositories en hun databasepaden. |
-| `lens add <dir>` | Registreer een nieuw project en voer direct de eerste sync uit. |
-| `lens remove <id\|dir>` | Verwijder een repository uit de registry. |
-| `lens tools` | Toont alle beschikbare tools met hun schema's en parameters. |
+| `lens sync [--repo <dir>] [--full]` | Sync the graph for the current project or a target folder. |
+| `lens ask <tool> '<json>'` | Call one of the research tools directly (e.g. `lens ask functionView '{"symbol":"createProfiler"}'`). |
+| `lens mcp [-d]` | Start the MCP server (optionally in the background with `-d`). |
+| `lens stop [pid]` | End the background daemon and release ports and locks, or only the given PID. |
+| `lens ps` | Show the tracked daemon PIDs per folder. |
+| `lens status` | Show whether the background daemon is running. |
+| `lens ui [--port 4317]` | Start the interactive graph visualisation in the browser. |
+| `lens list` | Overview of all registered repositories and their database paths. |
+| `lens add <dir>` | Register a new project and run the first sync right away. |
+| `lens remove <id\|dir>` | Remove a repository from the registry. |
+| `lens tools` | Show all available tools with their schemas and parameters. |
+| `lens install [agent...]` | Install the MCP stdio configuration in detected agents. |
+| `lens install --skill` | Install the Lady-lens workflow skill, write `~/.lady-lens/lens-instructions.md`, and add one marked line pointing to it in `~/.claude/CLAUDE.md`, `~/.copilot/copilot-instructions.md`, `~/.codex/AGENTS.md` and `~/.vibe/AGENTS.md`; own rules files for VS Code and Antigravity. |
+| `lens uninstall [agent...]` | Remove the MCP entry from the agents. |
+| `lens uninstall --skill` | Remove the skill, the marked line and the two rules files. |
+| `lens install --mendix` | Install the `lady-lens-mendix` skill in the detected Claude, Copilot and Agents skill directories: search Mendix pages, widgets and flows in `.mxcli/mdl` (written by `lens sync` from mxcli's catalog), change them with `mxcli`. `lens uninstall --mendix` removes it. |
+| `lens v` / `lens version` | Show the installed package version. |
+| `.\scripts\update-lens.ps1 [-Pack] [-Source <source>]` | Stop lens, install the newest package from `dist` (or `-Source`) globally and start `lens mcp -d` again. |

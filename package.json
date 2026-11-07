@@ -1,6 +1,6 @@
 {
   "name": "lady-lens",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Kura's code graph for any JavaScript repository: definitions, imports, function view, decisions. Local, on Ladybug.",
   "license": "GPL-3.0-or-later",
   "author": "Kim Van Renterghem <kim.van.renterghem@gmail.com>",
@@ -27,6 +27,9 @@
     "access": "public"
   },
   "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
   "main": "index.js",
   "exports": {
     ".": "./index.js",
@@ -47,6 +50,7 @@
     "index.js",
     "core",
     "bin",
+    "skills",
     "ui",
     "README.md",
     "DOCUMENTATIE.md",
@@ -57,9 +61,10 @@
     "lady-lens": "bin/lens.mjs"
   },
   "scripts": {
+    "build": "npm run skill && npm run check && npm run pack",
     "start": "npm run mcp  -d",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage && node scripts/check-coverage-branches.mjs",
     "lint": "eslint .",
     "check": "npm run lint && npm run test:coverage",
     "prepublishOnly": "npm run check",
@@ -69,7 +74,8 @@
     "pack": "npm pack --pack-destination dist",
     "eval:graph": "node evals/graphEval.mjs",
     "bench": "node scripts/benchmark.mjs",
-    "test:perf": "vitest run test/performance.test.js"
+    "test:perf": "vitest run test/performance.test.js test/performance.branch.test.js",
+    "skill": "node scripts/update-skill.mjs"
   },
   "dependencies": {
     "@ladybugdb/core": "^0.21.2",
@@ -89,5 +95,8 @@
   },
   "allowScripts": {
     "@ladybugdb/core@0.21.2": true
+  },
+  "overrides": {
+    "minimatch": "^11.0.1"
   }
 }

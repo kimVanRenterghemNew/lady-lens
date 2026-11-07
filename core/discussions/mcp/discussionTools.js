@@ -4,9 +4,16 @@
  * @module core/discussions/mcp/discussionTools
  */
 import { saveDiscussion, loadDiscussions, editDiscussion } from '../storage/index.js';
-import { queryDiscussions } from '../query/index.js';
+import { queryDiscussions, withProvenance } from '../query/index.js';
 import { buildDiscussion } from '../model/index.js';
+import { createGit } from '../../git/index.js';
+import { REPO_ROOT } from '../../configuration/index.js';
 import { createGraphRepository, sessionScope, createGraph, PROJECT_SCOPE } from '../../graph/index.js';
+
+// `usedBy`: the consumers of a host that should get a tool (a host filters its tool catalog on it); a schema without it reaches
+// every consumer, so a coder got five discussion schemas, two of them writing. `readOnly` says whether a tool changes anything.
+const DISCUSSION_CONSUMERS = ['/discuss', '/research'];
+const WRITING = new Set(['discussion_save', 'discussion_edit']);
 
 export const DISCUSSION_TOOL_SCHEMAS = [
     {
@@ -22,7 +29,8 @@ export const DISCUSSION_TOOL_SCHEMAS = [
                 },
                 sources: {
                     type: 'array',
-                    description: 'Grounding sources consulted (array of file paths or {file, relevance, confidence})'
+                    description: 'Grounding sources consulted (file paths)',
+                    items: { type: 'string' }
                 },
                 key: { type: 'string', description: 'Optional unique slug/key for the discussion' }
             },
@@ -42,7 +50,8 @@ export const DISCUSSION_TOOL_SCHEMAS = [
                 },
                 sources: {
                     type: 'array',
-                    description: 'Grounding sources consulted (array of file paths or {file, relevance, confidence})'
+                    description: 'Grounding sources consulted (file paths)',
+                    items: { type: 'string' }
                 },
                 sessionId: { type: 'string', description: 'Session ID (default: default)' },
                 writeMarkdown: { type: 'boolean', description: 'Also write markdown file to discussions/ folder (default: false)' }
@@ -68,7 +77,8 @@ export const DISCUSSION_TOOL_SCHEMAS = [
                 },
                 addSources: {
                     type: 'array',
-                    description: 'New grounding sources to link to the discussion'
+                    description: 'New grounding sources to link to the discussion (file paths)',
+                    items: { type: 'string' }
                 },
                 question: { type: 'string', description: 'Updated question/title' },
                 sessionId: { type: 'string', description: 'Session ID (default: default)' },
@@ -101,7 +111,7 @@ export const DISCUSSION_TOOL_SCHEMAS = [
             }
         }
     }
-];
+].map(schema => ({ ...schema, usedBy: DISCUSSION_CONSUMERS, readOnly: !WRITING.has(schema.name) }));
 
 export async function handleDiscussionBuild(args = {}) {
     const built = buildDiscussion(args);
@@ -109,7 +119,7 @@ export async function handleDiscussionBuild(args = {}) {
 }
 
 export async function handleDiscussionSave(args = {}, deps = {}) {
-    const result = await saveDiscussion(args);
+    const result = await saveDiscussion({ git: deps.git ?? createGit({ root: REPO_ROOT }), ...args });
     if (typeof deps.onSave === 'function') deps.onSave(result);
     return {
         saved: true, nodeId: result.node.id, node: result.node,
@@ -131,7 +141,7 @@ export async function handleDiscussionLoad(args = {}) {
     return { sessionId: args.sessionId || 'default', ...loaded };
 }
 
-export async function handleDiscussionQuery(args = {}, { repository = null } = {}) {
+export async function handleDiscussionQuery(args = {}, { repository = null, git = null, root = REPO_ROOT } = {}) {
     const sessionId = args.sessionId || 'default';
     const repo = repository || createGraphRepository();
     const loaded = await repo.loadGraph({ scopes: [sessionScope(sessionId), PROJECT_SCOPE] });
@@ -140,7 +150,7 @@ export async function handleDiscussionQuery(args = {}, { repository = null } = {
     for (const edge of loaded.edges) {
         graph.addEdge(edge.from, edge.to, edge.type, { weight: edge.weight, confidence: edge.confidence });
     }
-    const matches = queryDiscussions(graph, { topic: args.topic, node: args.node, limit: args.limit || 10 });
+    const matches = withProvenance(queryDiscussions(graph, { topic: args.topic, node: args.node, limit: args.limit || 10 }), { root, git: git ?? createGit({ root }) });
     return { sessionId, matchCount: matches.length, discussions: matches };
 }
 

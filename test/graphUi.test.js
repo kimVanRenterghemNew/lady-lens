@@ -42,6 +42,18 @@ describe('lens ui', () => {
         expect(answer).toEqual({ symbol: 'f', locations: [{ path: 'core/a.js' }] });
     });
 
+    it('runs each request in the repository picked with ?repo= and refuses an unregistered one with 403', async () => {
+        const runInRepo = async (hint, fn) => {
+            if (hint === 'nope') throw Object.assign(new Error('not registered'), { status: 403 });
+            return fn({ path: hint || 'C:\\default' });
+        };
+        const base = await start({ tools: {}, loadOverview: async () => graph, runInRepo, listRepos: () => [{ id: 'abc', path: 'C:\\other', database: 'x' }] });
+        expect(await fetch(base + '/api/repo?repo=C:%5Cother').then(r => r.json())).toEqual({ repo: 'C:\\other' });
+        expect(await fetch(base + '/api/repo').then(r => r.json())).toEqual({ repo: 'C:\\default' });
+        expect((await fetch(base + '/api/overview?repo=nope')).status).toBe(403);
+        expect(await fetch(base + '/api/repos').then(r => r.json())).toEqual([{ id: 'abc', path: 'C:\\other' }]);
+    });
+
     it('MUST refuse an unknown tool and bad JSON with 400', async () => {
         const base = await start({ tools: {}, loadOverview: async () => graph });
         expect((await fetch(base + '/api/ask?tool=write')).status).toBe(400);

@@ -109,6 +109,15 @@ export function unregisterRepo(idOrPath, registryFile = REGISTRY_FILE) {
     return null;
 }
 
+/** A registered repository by id or path; null when unknown (unlike resolveRepoTarget, never invents one). */
+export function findRegisteredRepo(idOrPath, registryFile = REGISTRY_FILE) {
+    if (!idOrPath) return null;
+    const { repos } = readRegistry(registryFile);
+    if (repos[idOrPath]) return repos[idOrPath];
+    const resolved = path.resolve(idOrPath).toLowerCase();
+    return Object.values(repos).find(r => path.resolve(r.path).toLowerCase() === resolved) || null;
+}
+
 export function resolveRepoTarget(idOrPath, registryFile = REGISTRY_FILE) {
     if (!idOrPath) return null;
     const registry = readRegistry(registryFile);

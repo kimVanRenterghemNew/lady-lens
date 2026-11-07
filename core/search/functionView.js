@@ -2,15 +2,24 @@
 import { createGraph, functionView, createGraphRepository } from '../graph/index.js';
 import { refreshProjectGraph, readRepoFile } from './graphModelLoader.js';
 
+/** functionView of one symbol on the small subgraph Ladybug returns for it; null when the graph does not know the symbol. */
+export async function viewOf(repository, symbol, { maxSites, readFile = readRepoFile } = {}) {
+    const sub = await repository.directFunctionViewGraph(symbol);
+    if (!sub.nodes.length) return null;
+    const graph = createGraph('functionView');
+    for (const { id, type, ...data } of sub.nodes) graph.addNode(id, type, data);
+    for (const edge of sub.edges) graph.addEdge(edge.from, edge.to, edge.type, { weight: edge.weight ?? 1, strength: edge.weight });
+    return functionView(graph, symbol, { readFile, maxSites });
+}
+
 export async function functionViewTool(args, { refresh = refreshProjectGraph } = {}) {
-    const { symbol } = args ?? {};
+    const { symbol, maxSites } = args ?? {};
     if (typeof symbol !== 'string' || !symbol.trim()) {
         return { error: 'symbol is required (an identifier, e.g. "applyAnswers")' };
     }
     const freshness = await refresh();
-    const repository = createGraphRepository();
-    const sub = await repository.directFunctionViewGraph(symbol.trim());
-    if (!sub.nodes.length) {
+    const view = await viewOf(createGraphRepository(), symbol.trim(), { maxSites });
+    if (!view) {
         return {
             relation: 'functionView',
             symbol: symbol.trim(),
@@ -24,13 +33,5 @@ export async function functionViewTool(args, { refresh = refreshProjectGraph } =
             freshness
         };
     }
-    const graph = createGraph('functionView');
-    for (const { id, type, ...data } of sub.nodes) graph.addNode(id, type, data);
-    for (const edge of sub.edges) graph.addEdge(edge.from, edge.to, edge.type, { weight: edge.weight ?? 1, strength: edge.weight });
-    return {
-        relation: 'functionView',
-        ...functionView(graph, symbol.trim(), { readFile: readRepoFile }),
-        source: 'ladybug',
-        freshness
-    };
+    return { relation: 'functionView', ...view, source: 'ladybug', freshness };
 }
