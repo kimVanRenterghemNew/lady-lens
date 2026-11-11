@@ -11,28 +11,28 @@ import { clearProject, projectCounts } from './projectWriteQueries.js';
 
 export { rowToNode };
 
-const NODE_RETURN = 'n.id AS id, n.type AS type, n.kind AS kind, n.scope AS scope, n.path AS path, n.name AS name, '
-    + 'n.documentation AS documentation, n.metadata_json AS metadata_json, n.created_at AS created_at, n.updated_at AS updated_at';
+const NODE_RETURN = 'n.id AS id, n.type AS type, n.kind AS kind, n.scope AS scope, n.path AS path, n.name AS name, n.documentation AS documentation, n.metadata_json AS metadata_json, n.created_at AS created_at, n.updated_at AS updated_at';
 
 const DB_QUEUES = new Map();
 const LOCK_ERROR = /could not set lock|lock on file|database is locked|Error: 33/i;
 const configuredBatchSize = Number(lensEnv('GRAPH_WRITE_BATCH_SIZE'));
-const PROJECT_WRITE_BATCH_SIZE = Number.isFinite(configuredBatchSize) && configuredBatchSize > 0
-    ? Math.floor(configuredBatchSize)
-    : 500;
+const PROJECT_WRITE_BATCH_SIZE = Number.isFinite(configuredBatchSize) && configuredBatchSize > 0 ? Math.floor(configuredBatchSize) : 500;
+
+function handleLockError(error, attempt, attempts, databasePath) {
+    if (!LOCK_ERROR.test(String(error?.message ?? error))) throw error;
+    if (attempt >= attempts) {
+        const lockErr = new Error(`Database is vergrendeld door een ander proces (pad: ${databasePath}): ${error.message}. Tip: controleer met 'lens stop' of er een actieve daemon draait.`);
+        lockErr.cause = error; lockErr.code = 'ELOCKED';
+        throw lockErr;
+    }
+}
 
 export async function openWithLockRetry(open, databasePath, { attempts = 12, delayMs = 250 } = {}) {
     for (let attempt = 1; ; attempt++) {
         try {
             return await open({ databasePath });
         } catch (error) {
-            if (!LOCK_ERROR.test(String(error?.message ?? error))) throw error;
-            if (attempt >= attempts) {
-                const lockErr = new Error(`Database is vergrendeld door een ander proces (pad: ${databasePath}): ${error.message}. Tip: controleer met 'lens stop' of er een actieve daemon draait.`);
-                lockErr.cause = error;
-                lockErr.code = 'ELOCKED';
-                throw lockErr;
-            }
+            handleLockError(error, attempt, attempts, databasePath);
             await new Promise(resolve => setTimeout(resolve, delayMs));
         }
     }

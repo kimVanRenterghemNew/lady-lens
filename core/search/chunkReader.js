@@ -20,70 +20,125 @@ export function outlineOf(lines) {
     return entries;
 }
 
-function readByChunkId({ chunkId, graph, relPath }) {
-    let targetPath = relPath;
-    let targetSymbol = null;
-    let startLine = null;
-    let endLine = null;
+function fetchNode(graph, chunkId) {
+    if (!graph || !graph.getNode) return null;
+    const direct = graph.getNode(chunkId);
+    if (direct) return direct;
+    return graph.getNode(String(chunkId).toLowerCase());
+}
 
-    if (graph?.getNode) {
-        const node = graph.getNode(chunkId) || graph.getNode(String(chunkId).toLowerCase());
-        if (node && (node.type === 'CodeChunk' || node.type === 'Function')) {
-            targetPath = targetPath || node.path || node.file;
-            targetSymbol = node.name || node.symbol;
-            startLine = node.startLine ?? node.range?.[0];
-            endLine = node.endLine ?? node.range?.[1];
-        }
-    }
+function isChunkType(type) {
+    return type === 'CodeChunk' || type === 'Function';
+}
 
-    if (!targetSymbol || !targetPath) {
-        const match = String(chunkId).match(/^(?:chunk:)?([^#:]+)[#:]([a-zA-Z0-9_$]+)$/);
-        if (match) {
-            targetPath = targetPath || match[1];
-            targetSymbol = targetSymbol || match[2];
-        }
-    }
+function resolveNodeRange(node) {
+    const range = Array.isArray(node.range) ? node.range : [];
+    const startLine = Number.isInteger(node.startLine) ? node.startLine : range[0];
+    const endLine = Number.isInteger(node.endLine) ? node.endLine : range[1];
+    return { startLine, endLine };
+}
 
-    if (!targetPath || !targetSymbol) {
-        return { error: `chunk not found: ${chunkId}` };
-    }
+function resolveNodePath(node) {
+    if (node.path) return node.path;
+    return node.file || null;
+}
 
+function resolveNodeSymbol(node) {
+    if (node.name) return node.name;
+    return node.symbol || null;
+}
+
+function resolveChunkFromGraph(graph, chunkId) {
+    const node = fetchNode(graph, chunkId);
+    if (!node || !isChunkType(node.type)) return null;
+    const path = resolveNodePath(node);
+    const symbol = resolveNodeSymbol(node);
+    const range = resolveNodeRange(node);
+    return { path, symbol, startLine: range.startLine, endLine: range.endLine };
+}
+
+function resolveChunkFromPattern(chunkId) {
+    const match = String(chunkId).match(/^(?:chunk:)?([^#:]+)[#:]([a-zA-Z0-9_$]+)$/);
+    if (!match) return null;
+    return { path: match[1], symbol: match[2] };
+}
+
+function propertyFrom(obj, prop) {
+    return obj ? obj[prop] || null : null;
+}
+
+function pickTargetProperty(prop, rel, a, b) {
+    if (rel) return rel;
+    const fromA = propertyFrom(a, prop);
+    if (fromA) return fromA;
+    return propertyFrom(b, prop);
+}
+
+function resolveChunkTarget(chunkId, graph, relPath) {
+    const fromGraph = resolveChunkFromGraph(graph, chunkId);
+    const fromPattern = resolveChunkFromPattern(chunkId);
+    const targetPath = pickTargetProperty('path', relPath, fromGraph, fromPattern);
+    const targetSymbol = pickTargetProperty('symbol', null, fromGraph, fromPattern);
+    const startLine = (fromGraph && fromGraph.startLine) || null;
+    const endLine = (fromGraph && fromGraph.endLine) || null;
+    return { targetPath, targetSymbol, startLine, endLine };
+}
+
+function readChunkFile(targetPath) {
     const abs = resolveInRepo(targetPath);
-    if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) {
-        return { error: `chunk not found: ${chunkId}` };
-    }
-
-    let content;
+    if (!abs || !fs.existsSync(abs) || !fs.statSync(abs).isFile()) return null;
     try {
-        content = fs.readFileSync(abs, 'utf8');
+        return fs.readFileSync(abs, 'utf8');
     } catch {
-        return { error: `chunk not found: ${chunkId}` };
+        return null;
     }
+}
+
+function resolveRangeFromSource(content, symbol) {
+    const facts = analyzeSource(content);
+    const ranges = facts ? facts.symbolRanges : null;
+    const range = ranges ? ranges[symbol] : null;
+    if (!Array.isArray(range)) return null;
+    return { startLine: range[0], endLine: range[1] };
+}
+
+function resolveLinesRange(start, end, content, symbol) {
+    if (Number.isInteger(start) && Number.isInteger(end)) {
+        return { startLine: start, endLine: end };
+    }
+    return resolveRangeFromSource(content, symbol);
+}
+
+function isValidChunkRange(range, totalLines) {
+    if (!range) return false;
+    return range.startLine >= 1 && range.endLine >= range.startLine && range.startLine <= totalLines;
+}
+
+function hasTarget(target) {
+    return Boolean(target.targetPath && target.targetSymbol);
+}
+
+function readByChunkId({ chunkId, graph, relPath }) {
+    const target = resolveChunkTarget(chunkId, graph, relPath);
+    if (!hasTarget(target)) return { error: `chunk not found: ${chunkId}` };
+
+    const content = readChunkFile(target.targetPath);
+    if (content === null) return { error: `chunk not found: ${chunkId}` };
 
     const lines = content.split(/\r?\n/);
-
-    if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) {
-        const facts = analyzeSource(content);
-        const range = facts?.symbolRanges?.[targetSymbol];
-        if (!range || !Number.isInteger(range[0]) || !Number.isInteger(range[1])) {
-            return { error: `chunk not found: ${chunkId}` };
-        }
-        startLine = range[0];
-        endLine = range[1];
-    }
-
-    if (startLine < 1 || endLine < startLine || startLine > lines.length) {
+    const range = resolveLinesRange(target.startLine, target.endLine, content, target.targetSymbol);
+    if (!isValidChunkRange(range, lines.length)) {
         return { error: `chunk not found: ${chunkId}` };
     }
 
     return {
         chunkId,
-        path: targetPath,
-        symbol: targetSymbol,
-        startLine,
-        endLine,
+        path: target.targetPath,
+        symbol: target.targetSymbol,
+        startLine: range.startLine,
+        endLine: range.endLine,
         totalLines: lines.length,
-        content: lines.slice(startLine - 1, endLine).join('\n')
+        content: lines.slice(range.startLine - 1, range.endLine).join('\n')
     };
 }
 

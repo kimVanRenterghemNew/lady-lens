@@ -76,7 +76,8 @@ export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
         path: path.resolve(defaultRepo),
         database: databasePathOfRepo(idOfRepo(defaultRepo))
     };
-    activateRepoContext(currentRepo);
+    // no activateRepoContext here: Streamable HTTP builds a server per request, and activating outside the lock switched
+    // the repo of a call that was still running (answers from another repo's database). Each call activates in the lock.
 
     const toolSchemas = buildMcpToolSchemas(RESEARCH_TOOL_SCHEMAS);
 
@@ -91,22 +92,22 @@ export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
         };
     });
 
+    function syncRepoContext(args, name, fallbackRepo) {
+        if (args.repo && name !== 'repo_remove') {
+            const target = resolveRepoTarget(args.repo);
+            if (target) activateRepoContext(target);
+            delete args.repo;
+            return;
+        }
+        if (fallbackRepo) activateRepoContext(fallbackRepo);
+    }
+
     server.setRequestHandler(CallToolRequestSchema, (request) => withRepoLock(async () => {
         const { name, arguments: rawArgs = {} } = request.params;
         const args = { ...rawArgs };
 
         try {
-            // Check for repo switch
-            if (args.repo && name !== 'repo_remove') {
-                const target = resolveRepoTarget(args.repo);
-                if (target) {
-                    activateRepoContext(target);
-                }
-                delete args.repo;
-            } else if (currentRepo) {
-                activateRepoContext(currentRepo);
-            }
-
+            syncRepoContext(args, name, currentRepo);
             return await callTool(name, args, { activate: activateRepoContext });
         } catch (error) {
             return {

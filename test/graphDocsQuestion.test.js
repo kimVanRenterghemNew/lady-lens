@@ -49,6 +49,26 @@ describe('graph_query cuts edges before nodes', () => {
         expect(fitted.nodes.length).toBe(8);
         expect(fitted.edges.length).toBeLessThan(20);
     });
+
+    it('diff_impact over a big range keeps the riskiest functions: the changed files go first (164 files left 0 functions)', async () => {
+        const { fitToBudget } = await import('../core/search/index.js');
+        const src = fs.readFileSync('core/search/index.js', 'utf8');
+        const lists = JSON.parse(src.match(/diff_impact: withBudget\(args => diffImpact\(args\), \{ lists: (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+        const files = Array.from({ length: 164 }, (_, i) => `core/some/folder/file${i}.js`);
+        const functions = Array.from({ length: 3 }, (_, i) => ({ function: `f${i}`, file: files[i], callers: [], tests: [] }));
+        const fitted = fitToBudget({ relation: 'diffImpact', files, functions, testGaps: files.map(file => `${file}#f`), total: 978 }, { lists });
+        expect(fitted.functions).toHaveLength(3);
+    });
+
+    it('the hint says per list what is shown, so a matchCount above the nodes shown is explained (Kura, 2026-11-11)', async () => {
+        const { fitToBudget } = await import('../core/search/index.js');
+        const big = (n, tag) => Array.from({ length: n }, (_, i) => ({ id: `${tag}${i}`, text: 'y'.repeat(600) }));
+        const fitted = fitToBudget({ matchCount: 20, nodes: big(20, 'n'), edges: big(30, 'e') }, { lists: ['nodes', 'edges'] });
+        expect(fitted.edges).toEqual([]);
+        expect(fitted.hint).toContain(`nodes ${fitted.nodes.length} of 20`);
+        expect(fitted.hint).toContain('edges 0 of 30');
+        expect(fitted.omitted).toBe(20 - fitted.nodes.length + 30);
+    });
 });
 
 describe('search only the documentation', () => {

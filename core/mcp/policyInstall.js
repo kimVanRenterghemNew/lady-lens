@@ -31,12 +31,19 @@ export function policyTargets({ home = os.homedir(), platform = process.platform
     ];
 }
 
+function handleMarkedLine(kept) {
+    if (/^\r?\n$/.test(kept[kept.length - 1] ?? '')) kept.pop();
+}
+
 /** `text` without the lines that carry `mark` and the blank line `withLink` put before them; every other byte stays. */
 export function withoutLink(text, mark = MARK) {
     const kept = [];
     for (const line of text.split(/(?<=\n)/)) {
-        if (!line.includes(mark)) kept.push(line);
-        else if (/^\r?\n$/.test(kept[kept.length - 1] ?? '')) kept.pop();
+        if (line.includes(mark)) {
+            handleMarkedLine(kept);
+        } else {
+            kept.push(line);
+        }
     }
     return kept.join('');
 }
@@ -69,9 +76,9 @@ export function uninstallPolicy(target, dryRun) {
     const before = read(target.file);
     if (before === null || (target.header === undefined && !before.includes(MARK))) return { status: 'absent' };
     if (!dryRun) {
-        if (target.header !== undefined) fs.rmSync(target.file, { force: true });
-        else if (withoutLink(before)) write(target.file, withoutLink(before));
-        else fs.rmSync(target.file, { force: true }); // only our line was in it: we made the file
+        const clean = target.header === undefined ? withoutLink(before) : null;
+        if (clean) write(target.file, clean);
+        else fs.rmSync(target.file, { force: true });
     }
     return { status: 'removed' };
 }

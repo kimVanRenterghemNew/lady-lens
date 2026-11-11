@@ -1,0 +1,390 @@
+{
+  "depth": {},
+  "elseIf": {},
+  "functions": {
+    "core/branches/branchDiff.js": {
+      "branchDiff#1": 10
+    },
+    "core/branches/branchImpact.js": {
+      "branchImpact#1": 15
+    },
+    "core/branches/changedFunctions.js": {
+      "changedFunctions#1": 10
+    },
+    "core/branches/commitShow.js": {
+      "commitShow#1": 8
+    },
+    "core/branches/compare.js": {
+      "parse#1": 8,
+      "relationChanges#1": 9
+    },
+    "core/branches/functionHistory.js": {
+      "functionHistory#1": 14
+    },
+    "core/configuration/frontmatter.js": {
+      "parseFrontmatter#1": 6,
+      "parseObjectItemProperties#1": 6,
+      "parseTopLevelField#1": 6
+    },
+    "core/configuration/paths.js": {
+      "toRepoRelative#1": 7
+    },
+    "core/discussions/mcp/discussionTools.js": {
+      "handleDiscussionQuery#1": 12
+    },
+    "core/discussions/model/nodes.js": {
+      "createDiscussionNode#1": 22,
+      "resolveTargetNodeId#1": 7
+    },
+    "core/discussions/model/record.js": {
+      "Arrow function#1": 10,
+      "buildDiscussionRecord#1": 14,
+      "parseDiscussionMarkdown#1": 15
+    },
+    "core/discussions/query/discussionQuery.js": {
+      "Arrow function#1": 7,
+      "findDiscussionsForNode#1": 30,
+      "queryDiscussions#1": 13
+    },
+    "core/discussions/query/sourceStatus.js": {
+      "Arrow function#1": 11,
+      "sourceStatuses#1": 10
+    },
+    "core/discussions/storage/discussionStore.js": {
+      "createSourceStubNode#1": 6,
+      "editDiscussion#1": 26,
+      "loadDiscussions#1": 20,
+      "saveDiscussion#1": 38
+    },
+    "core/discussions/storage/markdownExtractor.js": {
+      "Arrow function#1": 8
+    },
+    "core/eval/graphEval.js": {
+      "Async arrow function#1": 6,
+      "evaluateFreshness#1": 8,
+      "formatGraphEval#1": 13
+    },
+    "core/eval/searchBench.js": {
+      "scoreAnswer#1": 16
+    },
+    "core/git/fakeGit.js": {
+      "Arrow function#1": 7,
+      "Arrow function#2": 8,
+      "treeDiff#1": 7
+    },
+    "core/git/index.js": {
+      "commitFiles#1": 8,
+      "readBlobs#1": 9
+    },
+    "core/graph/adapters/ladybug/configIndexer.js": {
+      "configFacts#1": 6,
+      "projectFacts#1": 11,
+      "referenceManagerFacts#1": 11
+    },
+    "core/graph/adapters/ladybug/ladybugGraphStore.js": {
+      "entityRow#1": 7,
+      "migrate#1": 6
+    },
+    "core/graph/adapters/ladybug/ladybugIndexer.js": {
+      "buildCodeEntity#1": 10
+    },
+    "core/graph/adapters/ladybug/ladybugMarkdownIndexer.js": {
+      "buildDocumentEntity#1": 7,
+      "documentReferences#1": 6
+    },
+    "core/graph/adapters/ladybug/repositoryStore.js": {
+      "applyProjectChanges#1": 10,
+      "Async arrow function#1": 8,
+      "Async arrow function#2": 11,
+      "openWithLockRetry#1": 6
+    },
+    "core/graph/adapters/ladybug/writeBatches.js": {
+      "batchesOf#1": 7
+    },
+    "core/graph/adapters/memory/repositoryStore.js": {
+      "applyProjectChanges#1": 6,
+      "Arrow function#1": 8,
+      "stats#1": 6,
+      "toRow#1": 9
+    },
+    "core/graph/model/calls.js": {
+      "Arrow function#1": 7
+    },
+    "core/graph/model/decisions.js": {
+      "Arrow function#1": 8,
+      "decisionNodes#1": 6
+    },
+    "core/graph/model/graphIds.js": {
+      "createChunkNode#1": 6
+    },
+    "core/graph/model/graphValidation.js": {
+      "validateGraph#1": 25
+    },
+    "core/graph/query/architectureMetrics.js": {
+      "calculateArchitectureMetrics#1": 22,
+      "computePageRank#1": 11
+    },
+    "core/graph/query/functionView.js": {
+      "Arrow function#1": 11,
+      "Arrow function#2": 6,
+      "functionView#1": 25
+    },
+    "core/graph/query/graphContext.js": {
+      "buildContextFromGraph#1": 11
+    },
+    "core/graph/query/graphSemantic.js": {
+      "buildContextMarkdown#1": 6,
+      "findSemanticMatches#1": 16,
+      "levenshteinDistance#1": 6,
+      "semanticSimilarity#1": 8
+    },
+    "core/graph/query/hubsAndBridges.js": {
+      "fileGraph#1": 6,
+      "hubsAndBridges#1": 9
+    },
+    "core/graph/query/importCycles.js": {
+      "shortestLoop#1": 8
+    },
+    "core/graph/query/importLookup.js": {
+      "Arrow function#1": 6,
+      "locateSymbols#1": 6,
+      "renderScopeInterfaces#1": 13,
+      "resolveCodeFile#1": 8
+    },
+    "core/graph/repository/graphRepository.js": {
+      "Arrow function#1": 6,
+      "assertValidRelations#1": 6
+    },
+    "core/graph/repository/projectGraphGate.js": {
+      "ensureProjectGraph#1": 9,
+      "touchProjectGraph#1": 11
+    },
+    "core/graph/sync/branchIndex.js": {
+      "indexBranch#1": 24
+    },
+    "core/graph/sync/codeFacts.js": {
+      "analyzeSource#1": 6,
+      "Arrow function#1": 13,
+      "Arrow function#2": 12,
+      "Arrow function#3": 20,
+      "extractPurpose#1": 8,
+      "isFunctionMember#1": 9
+    },
+    "core/graph/sync/fileEntity.js": {
+      "entityFor#1": 10
+    },
+    "core/graph/sync/gitHistory.js": {
+      "coChangeRelations#1": 15
+    },
+    "core/graph/sync/graphSync.js": {
+      "createGraphSync#1": 7,
+      "onFile#1": 10,
+      "syncFiles#1": 16,
+      "touch#1": 8,
+      "write#1": 7
+    },
+    "core/graph/sync/headCommit.js": {
+      "recordHead#1": 16
+    },
+    "core/graph/sync/languages/blocks.js": {
+      "findIndentedBlockEnd#1": 8
+    },
+    "core/graph/sync/languages/docker.js": {
+      "matchesFile#1": 7
+    },
+    "core/graph/sync/languages/index.js": {
+      "configForExtension#1": 7,
+      "isConfigFile#1": 6
+    },
+    "core/graph/sync/languages/shell.js": {
+      "extract#1": 13,
+      "extract#2": 8,
+      "extract#3": 7
+    },
+    "core/graph/sync/languages/sql.js": {
+      "extract#1": 15
+    },
+    "core/graph/sync/languages/web.js": {
+      "extract#1": 11,
+      "extract#2": 12
+    },
+    "core/graph/sync/mendix.js": {
+      "askMxcli#1": 8
+    },
+    "core/language/fuzzy.js": {
+      "closestWord#1": 10
+    },
+    "core/language/lexicon.js": {
+      "loadLexicon#1": 11
+    },
+    "core/mcp/agentInstall.js": {
+      "agentInstallCommand#1": 11,
+      "Arrow function#1": 6,
+      "formatAgentInstall#1": 8,
+      "runAgentInstall#1": 9,
+      "runSkillInstall#1": 13,
+      "serverEntry#1": 6,
+      "update#1": 6
+    },
+    "core/mcp/daemon.js": {
+      "daemonCommand#1": 8,
+      "existingDaemonMessage#1": 7,
+      "readDaemonInfo#1": 6,
+      "stopDaemon#1": 10,
+      "stopDaemonPid#1": 9
+    },
+    "core/mcp/handlers/config.js": {
+      "Arrow function#1": 13,
+      "configReferences#1": 9,
+      "configUpdate#1": 11
+    },
+    "core/mcp/handlers/crossRepoSearch.js": {
+      "crossRepoSearch#1": 19
+    },
+    "core/mcp/policyInstall.js": {
+      "installPolicy#1": 10,
+      "policyTargets#1": 8,
+      "uninstallPolicy#1": 7,
+      "withLink#1": 6
+    },
+    "core/mcp/streamableHttp.js": {
+      "handleStreamableHttpRequest#1": 12
+    },
+    "core/mcp/tomlInstall.js": {
+      "tomlInstall#1": 9
+    },
+    "core/mendix/elementDiff.js": {
+      "Arrow function#1": 13,
+      "elementChanges#1": 10,
+      "labelOf#1": 6
+    },
+    "core/mendix/mendixDiff.js": {
+      "changedUnits#1": 7,
+      "documentEntry#1": 12,
+      "mendixDiff#1": 12
+    },
+    "core/mendix/modelReader.js": {
+      "Arrow function#1": 7,
+      "locationOf#1": 8
+    },
+    "core/observability/debugLog.js": {
+      "Arrow function#1": 6,
+      "debug#1": 7
+    },
+    "core/observability/profiler.js": {
+      "formatReport#1": 8,
+      "getStats#1": 7
+    },
+    "core/repository/projectScanner.js": {
+      "inGraphScope#1": 8,
+      "scanGraphFiles#1": 13,
+      "walk#1": 8
+    },
+    "core/repository/projectSettings.js": {
+      "mergeSettings#1": 8
+    },
+    "core/repository/registry.js": {
+      "readRegistry#1": 6,
+      "registerRepo#1": 14,
+      "resolveRepoTarget#1": 7
+    },
+    "core/search/budget.js": {
+      "fitToBudget#1": 17
+    },
+    "core/search/chunkReader.js": {
+      "read_chunk#1": 26
+    },
+    "core/search/codeHealth.js": {
+      "getRepoChurn#1": 6,
+      "healthTool#1": 20
+    },
+    "core/search/codeHistory.js": {
+      "codeHistory#1": 14
+    },
+    "core/search/definedIn.js": {
+      "definedInTool#1": 6
+    },
+    "core/search/diffImpact.js": {
+      "diffImpact#1": 15,
+      "impactEntry#1": 15
+    },
+    "core/search/docMentions.js": {
+      "rankDocuments#1": 11
+    },
+    "core/search/exports.js": {
+      "graphFactTool#1": 9
+    },
+    "core/search/folderView.js": {
+      "folderViewTool#1": 16
+    },
+    "core/search/functionView.js": {
+      "functionViewTool#1": 7,
+      "viewOf#1": 7
+    },
+    "core/search/graphModelLoader.js": {
+      "freshnessFor#1": 8,
+      "loadGraphModel#1": 18,
+      "refreshProjectGraph#1": 11
+    },
+    "core/search/grepSearch.js": {
+      "glob#1": 7,
+      "grep#1": 27
+    },
+    "core/search/imports.js": {
+      "importLookupTool#1": 9,
+      "interfacesForScope#1": 8
+    },
+    "core/search/packageFolderView.js": {
+      "packageFolderView#1": 6
+    },
+    "core/search/queryFlow.js": {
+      "resolveCodebaseQuery#1": 21
+    },
+    "core/search/searchView.js": {
+      "Arrow function#1": 12,
+      "searchView#1": 15
+    },
+    "core/update/lensNode.js": {
+      "lensNodeCommand#1": 13
+    },
+    "core/update/lensUpdate.js": {
+      "runLensUpdate#1": 8
+    },
+    "scripts/benchmark.mjs": {
+      "runBenchmark#1": 16
+    },
+    "scripts/designRules.mjs": {
+      "measureDesignRules#1": 7
+    },
+    "ui/graph-ui-context.html": {
+      "showContext#1": 24,
+      "showHealth#1": 11,
+      "showHistory#1": 8,
+      "showTree#1": 6
+    },
+    "ui/graph-ui-graph.html": {
+      "Arrow function#1": 7,
+      "Arrow function#2": 6,
+      "drawFlow#1": 11,
+      "drawOverview#1": 11,
+      "showFlow#1": 7
+    },
+    "ui/graph-ui-health.html": {
+      "load#1": 15
+    },
+    "ui/graph-ui-nav.html": {
+      "Arrow function#1": 8,
+      "show#1": 9
+    },
+    "ui/graph-ui-trace.html": {
+      "Arrow function#1": 6,
+      "Async arrow function#1": 6
+    },
+    "ui/graph-ui.html": {
+      "Async arrow function#1": 8,
+      "doSearch#1": 24,
+      "renderResults#1": 15,
+      "showCode#1": 9
+    }
+  }
+}

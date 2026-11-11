@@ -20,13 +20,22 @@ export const FIXTURE_GOLD = JSON.parse(fs.readFileSync(new URL('./fixtureGold.js
 export const DEFAULT_THRESHOLDS = { recallAtK: 0.8, mrr: 0.5, negativesClean: 1, freshness: 1, k: 5 };
 const FIXTURE_SETTINGS = { project: { graph_roots: ['.'], exclude_dirs: ['.git', '.memory', 'node_modules'], graph_extensions: ['.js', '.mjs', '.md'] }, graph: { ast: { enabled: false } } };
 
+function restoreEnv(previous) {
+    previous.forEach(([key, value]) => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+    });
+}
+
 /** Settings by their lens name (e.g. GRAPH_DB), set under the variable the host mapped them to, restored afterwards. */
 async function withSettings(values, fn) {
     const entries = Object.entries(values).map(([name, value]) => [lensEnvName(name), value]);
     const previous = entries.map(([key]) => [key, process.env[key]]);
     for (const [key, value] of entries) process.env[key] = value;
-    try { return await fn(); } finally {
-        for (const [key, value] of previous) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    try {
+        return await fn();
+    } finally {
+        restoreEnv(previous);
     }
 }
 
@@ -99,7 +108,7 @@ async function evaluateFreshness(fixture, k) {
             const sync = createGraphSync({ root, repository: createGraphRepository({ databasePath }), settings: FIXTURE_SETTINGS });
             await sync.sync({ mode: 'full' });
             writeFiles(root, scenario.change.write || {});
-            for (const file of scenario.change.remove || []) fs.rmSync(path.join(root, file), { force: true });
+            (scenario.change.remove || []).forEach(file => fs.rmSync(path.join(root, file), { force: true }));
             await sync.sync();
             const got = await ask(databasePath, scenario.query, k);
             const foundOk = (scenario.expectFound || []).every(file => got.includes(file));

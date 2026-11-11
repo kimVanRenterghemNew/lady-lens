@@ -25,6 +25,16 @@ redo what changed), then `repo_sync`:
 mxcli -p <App.mpr> -c "refresh catalog full source"
 ```
 
+## Compare branches
+
+- "What does this branch change in the model?": `mendix_diff({ from: "<base branch>", to: "<branch>" })`. It reads both
+  versions of the model from git (no checkout, no mxcli, seconds): the commits, every changed page, microflow, nanoflow or
+  entity with its module, and per document the added, deleted and modified elements with each property before and after.
+- `.mxunit` and `.mpr` files are binary: `branch_diff`, `grep` and the `.mxcli/mdl` copy cannot show model changes between
+  commits; `mendix_diff` can. For a microflow or nanoflow, `flow.before` and `flow.after` hold the graph of both versions.
+- Report a change with the document's qualified name and the element (`name`, or `detail` for an activity such as
+  `NanoflowCallAction: Module.Flow`), the property path and its before and after value.
+
 ## Change
 
 - `.mxcli/mdl` is a read-only copy. Editing it changes nothing in the model; change the model with `mxcli`
@@ -36,5 +46,5 @@ mxcli -p <App.mpr> -c "refresh catalog full source"
 ## Requirements
 
 - `mxcli` on the PATH, or its full path in `LENS_MXCLI_PATH`.
-- Node 22.5 or newer for the MDL export (it reads mxcli's `.mxcli/catalog.db`).
+- Node 22.13 or newer for the MDL export and `mendix_diff` (older Node warns and skips the export). Keep PATH and nvm as they are: `lens node "C:\Program Files\nodejs\node.exe"` makes lens, its daemon and the agent registrations run on that newer Node.
 - `.mxcli/` stays out of git (it is in the `.gitignore` of a project set up with `mxcli init`).

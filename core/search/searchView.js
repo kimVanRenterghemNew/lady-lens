@@ -30,6 +30,31 @@ function classifyLine(line, query, fileKind) {
     return 'reference';
 }
 
+function matchLine(line, i, regex, queryTrimmed, fKind) {
+    regex.lastIndex = 0;
+    if (!regex.test(line)) return null;
+    const matchKind = classifyLine(line, queryTrimmed, fKind);
+    return {
+        line: i + 1,
+        text: line.trim(),
+        kind: matchKind,
+        ...(matchKind === 'definition' ? { symbol: queryTrimmed } : {})
+    };
+}
+
+function collectFileMatches(content, regex, queryTrimmed, fKind, state, limit) {
+    const lines = content.split('\n');
+    const matches = [];
+    for (let i = 0; i < lines.length && state.totalCount < limit; i++) {
+        const match = matchLine(lines[i], i, regex, queryTrimmed, fKind);
+        if (match) {
+            state.totalCount++;
+            matches.push(match);
+        }
+    }
+    return matches;
+}
+
 export function searchView(args = {}, { root = REPO_ROOT } = {}) {
     const { query, caseSensitive = false, wholeWord = false, isRegex = false, kind = 'all', include = '', limit = 100 } = args;
     if (typeof query !== 'string' || !query.trim()) return { error: 'query is required' };
@@ -43,10 +68,10 @@ export function searchView(args = {}, { root = REPO_ROOT } = {}) {
 
     const includeRegex = include && include.trim() ? globToRegExp(include.trim().replace(/\\/g, '/').replace(/^\.\//, '')) : null;
     const fileMatches = [];
-    let totalCount = 0;
+    const state = { totalCount: 0 };
 
     walkFiles(root, (absPath) => {
-        if (totalCount >= limit) return;
+        if (state.totalCount >= limit) return;
         const rel = relativeToRepo(absPath, root).replace(/\\/g, '/');
         if (includeRegex && !includeRegex.test(rel)) return;
 
@@ -57,24 +82,7 @@ export function searchView(args = {}, { root = REPO_ROOT } = {}) {
 
         let content;
         try { content = fs.readFileSync(absPath, 'utf8'); } catch { return; }
-        const lines = content.split('\n');
-        const matches = [];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            regex.lastIndex = 0;
-            if (regex.test(line)) {
-                totalCount++;
-                const matchKind = classifyLine(line, query.trim(), fKind);
-                matches.push({
-                    line: i + 1,
-                    text: line.trim(),
-                    kind: matchKind,
-                    ...(matchKind === 'definition' ? { symbol: query.trim() } : {})
-                });
-                if (totalCount >= limit) break;
-            }
-        }
+        const matches = collectFileMatches(content, regex, query.trim(), fKind, state, limit);
 
         if (matches.length > 0) {
             fileMatches.push({
@@ -87,9 +95,9 @@ export function searchView(args = {}, { root = REPO_ROOT } = {}) {
 
     return {
         query: query.trim(),
-        totalMatches: totalCount,
+        totalMatches: state.totalCount,
         filesCount: fileMatches.length,
         files: fileMatches,
-        truncated: totalCount >= limit
+        truncated: state.totalCount >= limit
     };
 }

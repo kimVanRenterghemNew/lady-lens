@@ -53,12 +53,10 @@ export function validateGraph(graph) {
 
   // Check nodesByType is in sync
   for (const [type, ids] of graph.nodesByType.entries()) {
-    for (const id of ids) {
+    ids.forEach(id => {
       const node = graph.getNode(id);
-      if (!node || node.type !== type) {
-        errors.push(`Type mismatch in nodesByType: ${id} (${type})`);
-      }
-    }
+      if (!node || node.type !== type) errors.push(`Type mismatch in nodesByType: ${id} (${type})`);
+    });
   }
 
   return {

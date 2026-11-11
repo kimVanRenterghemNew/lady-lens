@@ -70,6 +70,33 @@ const analyzeFile = (text, path) => (/\.[cm]?jsx?$/i.test(path) ?analyzeSource(t
  * @param {{readFile: (path: string) => string|null, maxSites?: number}} deps - repo-relative read (null when unreadable);
  *   `maxSites`: lines per caller, test and story (default 5, at most 200)
  */
+const makeEntry = (path, sites, named, max, functions, parseError) => (sites.length
+    ? { path, lines: [...new Set(sites.map(call => call[2]))].slice(0, max), ...(functions.length ? { functions } : {}) }
+    : { path, lines: named.slice(0, max), ...(parseError ? {} : { reference: true }) });
+
+function getSymbolLines(byPath, target, name) {
+    const node = byPath.get(target);
+    return node && node.symbolRanges ? node.symbolRanges[name] || null : null;
+}
+
+function recordCallee(path, call, symbol, targetOf, byPath, callees) {
+    if (call[0] !== symbol) return;
+    const target = targetOf(path, call);
+    const key = `${call[1]} ${target}`;
+    if (!callees.has(key)) {
+        callees.set(key, { name: call[1], path: target, lines: getSymbolLines(byPath, target, call[1]), at: [] });
+    }
+    callees.get(key).at.push(call[2]);
+}
+
+function dispatchCallerEntry(isTest, entry, fileText, symbol, tests, callers) {
+    if (isTest) {
+        tests.push({ ...entry, names: testNames(fileText, symbol) });
+        return;
+    }
+    callers.push(entry);
+}
+
 export function functionView(graph, symbol, { readFile, maxSites = MAX_LINES }) {
     const max = Math.max(1, Math.min(Number(maxSites) || MAX_LINES, 200));
     const empty = { symbol, found: false, definitions: [], calls: [], callers: [], tests: [], stories: [] };
@@ -119,11 +146,7 @@ export function functionView(graph, symbol, { readFile, maxSites = MAX_LINES }) 
     const callees = new Map();
     for (const path of defPaths) {
         for (const call of factsOf(path)?.calls ?? []) {
-            if (call[0] !== symbol) continue;
-            const target = targetOf(path, call);
-            const key = `${call[1]} ${target}`;
-            if (!callees.has(key)) callees.set(key, { name: call[1], path: target, lines: byPath.get(target)?.symbolRanges?.[call[1]] ?? null, at: [] });
-            callees.get(key).at.push(call[2]);
+            recordCallee(path, call, symbol, targetOf, byPath, callees);
         }
     }
 
@@ -136,15 +159,14 @@ export function functionView(graph, symbol, { readFile, maxSites = MAX_LINES }) 
         const sourceLines = file.text.split('\n');
         const named = linesWith(file.text, symbol).filter(line => !/^\s*import\b/.test(sourceLines[line - 1]));
         const isTest = isTestNode(byPath.get(path) ?? { path });
-        let entry;
-        const functions = [...new Set(sites.map(call => call[0]).filter(Boolean))];
         resolved += sites.length;
-        if (sites.length) entry = { path, lines: [...new Set(sites.map(call => call[2]))].slice(0, max), ...(functions.length ? { functions } : {}) };
-        else if (defPaths.includes(path) || !named.length || file.symbolRanges?.[symbol]) continue;   // its own X is another function
-        else entry = { path, lines: named.slice(0, max), ...(file.parseError ? {} : { reference: true }) };
-        if (!sites.length) unresolved += named.length;
-        if (isTest) tests.push({ ...entry, names: testNames(file.text, symbol) });
-        else callers.push(entry);
+        const isSelf = !sites.length && (defPaths.includes(path) || !named.length || file.symbolRanges?.[symbol]);
+        if (!isSelf) {
+            const functions = [...new Set(sites.map(call => call[0]).filter(Boolean))];
+            const entry = makeEntry(path, sites, named, max, functions, file.parseError);
+            unresolved += !sites.length ? named.length : 0;
+            dispatchCallerEntry(isTest, entry, file.text, symbol, tests, callers);
+        }
     }
     // Only the documents that MENTION a definition file are read; a graph synced before MENTIONS existed has none, then all are.
     const mentions = graph.edges.filter(edge => edge.type === 'MENTIONS');

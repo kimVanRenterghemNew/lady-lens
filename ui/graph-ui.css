@@ -58,7 +58,7 @@ header { background: var(--surface); border-bottom: 1px solid var(--border); box
 .tab-btn.active { background: var(--accent-light); color: var(--accent); border-color: #bfdbfe; font-weight: 600; }
 .tab-btn:focus-visible { outline: 2px solid var(--accent); }
 
-.tab-pane, lens-search, lens-health, lens-graph { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
+.tab-pane, lens-search, lens-health, lens-graph, lens-trace { display: none; flex: 1; min-height: 0; overflow: hidden; position: relative; }
 .tab-pane.active, lens-search.active, lens-health.active, lens-graph.active { display: flex; }
 
 /* View 1: Search & Code Explorer */
@@ -120,3 +120,44 @@ table.data-table tr:hover { background: var(--surface-hover); }
 .btn-usage { font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--accent); background: transparent; color: var(--accent); cursor: pointer; }
 .btn-usage:hover { background: var(--accent); color: #fff; }
 mark { background: #fef08a; color: inherit; padding: 1px 3px; border-radius: 2px; }
+
+/* Stack trace tab */
+.trace-pane { flex: 1; border-right: none; }
+#trace-in { margin: 14px 14px 0; min-height: 110px; resize: vertical; font-family: var(--font-mono); font-size: 11px; padding: 8px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--bg); color: var(--text); }
+.trace-frame { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.trace-frame.start { border-left: 3px solid var(--accent); padding-left: 8px; }
+.trace-code { margin: 6px 0 0; font-size: 11px; }
+.trace-code .hit { background: var(--warning-bg); display: inline-block; width: 100%; }
+.trace-lib { color: var(--muted); font-size: 11px; padding: 6px 0; }
+.trace-lib .trace-frame { opacity: 0.7; }
+.trace-pick { font-size: 11px; margin: 2px; }
+.badge.project { background: var(--success-bg); color: var(--success); }
+.badge.ambiguous { background: var(--warning-bg); color: var(--warning); }
+.badge.notFound { background: var(--danger-bg); color: var(--danger); }
+.badge.library { background: var(--surface-hover); color: var(--muted); }
+
+/* Context under the code view: the function at the line and the file's imports */
+#code-ctx { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; font-size: 12px; }
+.ctx-title { margin: 12px 0 4px; font-size: 13px; }
+.ctx-purpose { margin: 0 0 8px; color: var(--muted); }
+.ctx-block h4 { margin: 8px 0 2px; font-size: 12px; }
+.ctx-block ul { margin: 0; padding-left: 18px; }
+.ctx-block p { margin: 0; }
+
+/* Crumbs: back, forward and the places you visited, on every tab */
+.crumbs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 20px; background: var(--surface); border-bottom: 1px solid var(--border); font-size: 12px; flex-shrink: 0; }
+.crumbs .crumb { padding: 2px 8px; border-radius: 9999px; background: var(--surface-hover); }
+.crumbs .crumb.here { background: var(--accent-light); font-weight: 600; }
+.crumb-step { padding: 2px 8px; font-size: 11px; }
+
+/* Code view: the line you went to, functions with health issues, the file's health */
+pre.code .ln.focus { color: var(--accent); font-weight: 700; }
+pre.code .ln.warn { color: var(--danger); font-weight: 700; cursor: help; }
+pre.code .ln.warn::before { content: "⚠ "; }
+.ctx-health { margin: 0 0 6px; font-size: 12px; }
+.ctx-tree { list-style: none; padding-left: 14px; margin: 2px 0; }
+.ctx-tree summary { cursor: pointer; }
+
+/* Graph: flow toolbar and the Mermaid text */
+.graph-toolbar label, .graph-toolbar select { font-size: 12px; }
+.mermaid-out { position: absolute; right: 16px; top: 56px; max-width: 45%; max-height: 60%; overflow: auto; z-index: 11; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px; font-size: 11px; box-shadow: var(--card-shadow); }

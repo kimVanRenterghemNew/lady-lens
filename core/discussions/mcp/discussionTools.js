@@ -154,11 +154,17 @@ export async function handleDiscussionQuery(args = {}, { repository = null, git 
     return { sessionId, matchCount: matches.length, discussions: matches };
 }
 
+const DISCUSSION_TOOL_HANDLERS = {
+    __proto__: null, // a tool name like "toString" must not find an inherited handler
+    discussion_build(args) { return handleDiscussionBuild(args); },
+    discussion_save(args, deps) { return handleDiscussionSave(args, deps); },
+    discussion_edit(args, deps) { return handleDiscussionEdit(args, deps); },
+    discussion_load(args) { return handleDiscussionLoad(args); },
+    discussion_query(args, deps) { return handleDiscussionQuery(args, deps); }
+};
+
 export async function handleDiscussionTool(name, args, deps = {}) {
-    if (name === 'discussion_build') return handleDiscussionBuild(args);
-    if (name === 'discussion_save') return handleDiscussionSave(args, deps);
-    if (name === 'discussion_edit') return handleDiscussionEdit(args, deps);
-    if (name === 'discussion_load') return handleDiscussionLoad(args);
-    if (name === 'discussion_query') return handleDiscussionQuery(args, deps);
-    throw new Error(`Unknown discussion tool: ${name}`);
+    const handler = DISCUSSION_TOOL_HANDLERS[name];
+    if (!handler) throw new Error(`Unknown discussion tool: ${name}`);
+    return handler(args, deps);
 }

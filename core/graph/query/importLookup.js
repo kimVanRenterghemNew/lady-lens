@@ -7,9 +7,10 @@
  * everything that answers an import question goes through the functions below.
  *
  * Pure: takes a graph (`nodes` Map + `getIncoming`/`getOutgoing`), no I/O.
- * TODO(coverage): Current line coverage is 80.35% (< 85% target). Raise to >= 85%.
  * @module core/graph/importLookup
  */
+
+export { looksLikeRepoPath, recognizeImportQuestion, recognizeSymbolQuestion } from './questionIntent.js';
 
 export const IMPORT_EDGE = 'IMPORTS';
 
@@ -39,15 +40,21 @@ export function resolveCodeFile(graph, ref) {
     return {};
 }
 
+const targetNodeId = (edge, direction) => (direction === 'incoming' ? edge.from : edge.to);
+
+function collectNeighbour(graph, edge, direction, nodePath, files) {
+    if (!isImportEdgeType(edge.type)) return;
+    const other = graph.getNode(targetNodeId(edge, direction));
+    if (other?.type === 'CodeFile' && other.path !== nodePath) files.add(other.path);
+}
+
 function neighbours(graph, ref, direction) {
     const resolved = resolveCodeFile(graph, ref);
     if (!resolved.node) return { file: normalizeRef(ref), found: false, candidates: resolved.candidates ?? [], files: [] };
     const edges = direction === 'incoming' ? graph.getIncoming(resolved.node.id) : graph.getOutgoing(resolved.node.id);
     const files = new Set();
     for (const edge of edges) {
-        if (!isImportEdgeType(edge.type)) continue;
-        const other = graph.getNode(direction === 'incoming' ? edge.from : edge.to);
-        if (other?.type === 'CodeFile' && other.path !== resolved.node.path) files.add(other.path);
+        collectNeighbour(graph, edge, direction, resolved.node.path, files);
     }
     return { file: resolved.node.path, found: true, candidates: [], files: [...files].sort() };
 }
@@ -58,67 +65,22 @@ export const importersOf = (graph, ref) => neighbours(graph, ref, 'incoming');
 /** Files `ref` imports (sorted, once each, complete). */
 export const importsOf = (graph, ref) => neighbours(graph, ref, 'outgoing');
 
-/** Does this repo path look like something an import question names (`core/a/b.js`)? */
-export const looksLikeRepoPath = (text) => /[\w.-]+\/[\w./-]*\.(?:m?js|cjs|ts|tsx|jsx|json)\b/.test(String(text ?? ''));
-
-const PATH_TOKEN = /[`'"]?((?:\.{0,2}\/)?[\w.-]+(?:\/[\w.-]+)*\.(?:m?js|cjs|tsx?|jsx))[`'"]?/;
-
-/**
- * Is this prompt a question about who imports a file / what a file imports? Deterministic, so the answer can come from the
- * graph before the model is asked (single source, see `importersOf`/`importsOf`).
- * @param {string} text
- * @returns {{relation: 'imports'|'importedBy'|'exports'|'exists', file: string} | null}
- */
-export function recognizeImportQuestion(text) {
-    const prompt = String(text ?? '');
-    const match = prompt.match(PATH_TOKEN);
-    const isQuestion = /\?|^\s*(?:geef|list|which|welke|wat|staat|is|does|bestaat|what)\b/i.test(prompt);
-    if (!match || !isQuestion) return null;
-    const file = match[1].replace(/^\.\//, '');
-    // Facts that are not import relations but live in the same graph (research run 2026-10-08): exports of a file, does a file exist.
-    if (/\bnames?\s+(?:can|kan)\s+(?:i|ik)\s+import(?:eren)?\s+(?:from|uit)\b|\bnamen\s+kan\s+ik\s+importeren\b/i.test(prompt)) return { relation: 'exports', file };
-    if (!/import|ge[iï]mporteerd/i.test(prompt)) {
-        if (/\bexport(?:eert|eren|s|ed)?\b/i.test(prompt)) return { relation: 'exports', file };
-        if (/\b(?:staat er|is er|is there|bestaat|exists?|can i open|kan ik)\b|\b(?:yes or no|ja of nee)\b/i.test(prompt)) return { relation: 'exists', file };
-    }
-    if (!/import|ge[iï]mporteerd|hangt|depend|gebruikt|uses/i.test(prompt)) return null;
-    const before = prompt.slice(0, match.index);
-    const after = prompt.slice(match.index + match[0].length);
-    const verbBefore = /\bimporteren\b|\bimport(?:s)?\b|\bgebruikt\b|\buses\b|\bwie importeert\b/i.test(before);
-    // X is the subject: "does X import", "X depends on", "importeert X", "imports of X", "van welke modules hangt X af"
-    const subject = /\b(?:does|do)\s+$/i.test(before.trimEnd() + ' ') && /^\W*\s*(?:\w+\s+)?import\b/i.test(after)
-        || /\bimports?\b/i.test(after.split(/[.?!]/)[0]) && /\b(?:does|do)\b/i.test(before)
-        || /\bdepends?\s+on\b|\bhangt\b.*\baf\b/i.test(before + ' ' + after)
-        || /\b(?:internal\s+)?imports?\s+(?:of|from)\s*$/i.test(before.trimEnd())
-        || /\b(?:interne\s+)?imports\s+van\s*$/i.test(before.trimEnd())
-        || /\bimporteert\b/i.test(before) && !/\bwie\s+importeert\b/i.test(before);
-    if (subject) return { relation: 'imports', file };
-    if (verbBefore || /\b(?:imported|ge[iï]mporteerd)\b/i.test(after)) return { relation: 'importedBy', file };
+function rangeLocation(node, symbol) {
+    const ranges = node.symbolRanges || node.metadata?.symbolRanges;
+    const range = ranges?.[symbol];
+    if (Array.isArray(range)) return { path: node.path, startLine: range[0], endLine: range[1] };
     return null;
 }
 
-const STOP_WORDS = new Set(['which', 'where', 'what', 'file', 'files', 'module', 'modules', 'defines', 'defined', 'implemented', 'contains', 'exports', 'function', 'answer', 'repository', 'relative', 'root', 'welk', 'welke', 'waar', 'bestand', 'wordt', 'gedefinieerd', 'staat', 'functie', 'exporteert', 'antwoord', 'zoek', 'waarin', 'zoek', 'need', 'path', 'relatief', 'repository-root', 'repository-relative', 'there', 'implement', 'met', 'het', 'pad', 'aan', 'een', 'van', 'naar', 'with', 'the', 'relative', 'answer']);
-const LOCATION_INTENT = /\b(?:gedefinieerd|defined?|defines|implemented|ge[iï]mplementeerd|waarin|contains|bevat|zit|staat|exporteert|exports?)\b/i;
-const WHICH_FILE = /\b(?:welk(?:e)?|which|waar|where|in\s+welk|bestand|file|module)\b/i;
+function exportLocation(node, symbol) {
+    const exp = node.exports || node.metadata?.exports;
+    if (Array.isArray(exp) && exp.includes(symbol)) return { path: node.path };
+    return null;
+}
 
-/**
- * Is this prompt "where is the symbol X defined"? Deterministic (like `recognizeImportQuestion`), so the graph can answer it.
- * A question that names a file path is an import/exports/exists question, not this one. The candidates are every identifier-like word
- * that is not a question word (backticked ones first); the graph decides which of them is a real symbol (`definedIn`).
- * @returns {{relation: 'definedIn', symbols: string[]} | null}
- */
-export function recognizeSymbolQuestion(text) {
-    const prompt = String(text ?? '');
-    if (!prompt.trim() || looksLikeRepoPath(prompt) || PATH_TOKEN.test(prompt)) return null;
-    const isQuestion = /\?|^\s*(?:waar|welk|welke|which|where|in welk)\b/i.test(prompt);
-    if (!isQuestion || !LOCATION_INTENT.test(prompt) || !WHICH_FILE.test(prompt)) return null;
-    const ticked = [...prompt.matchAll(/`([A-Za-z_$][\w$]*)`/g)].map(match => match[1]);
-    const words = (prompt.match(/[A-Za-z_$][\w$]*/g) ?? []).filter(word => word.length >= 3 && !STOP_WORDS.has(word.toLowerCase()));
-    const named = prompt.match(/\b(?:functie|function|methode|method|class|klasse|constante|const)\s+`?([A-Za-z_$][\w$]*)/i)?.[1];
-    // `camelCase`, `PascalCase`, `snake_case`, `name2` are identifiers; plain words are only candidates when nothing looks like one.
-    const identifiers = words.filter(word => /[a-z][A-Z]|_|\d/.test(word));
-    const symbols = [...new Set(ticked.length ? ticked : (named ? [named] : (identifiers.length ? identifiers : words)))];
-    return symbols.length ? { relation: 'definedIn', symbols } : null;
+function findSymbolLocation(node, symbol) {
+    if (node.kind === 'test' || typeof node.path !== 'string') return null;
+    return rangeLocation(node, symbol) || exportLocation(node, symbol);
 }
 
 /**
@@ -126,16 +88,11 @@ export function recognizeSymbolQuestion(text) {
  * @returns {{symbol: string, found: boolean, locations: Array<{path: string, startLine?: number, endLine?: number}>}}
  */
 export function definedIn(graph, symbol) {
-    const locations = [];
     const files = graph.getNodesByType ? graph.getNodesByType('CodeFile') : codeFiles(graph);
-    for (const node of files) {
-        if (node.kind === 'test' || typeof node.path !== 'string') continue;
-        const range = (node.symbolRanges ?? node.metadata?.symbolRanges)?.[symbol];
-        const isRange = Array.isArray(range), exp = node.exports ?? node.metadata?.exports;
-        if (!isRange && (!Array.isArray(exp) || !exp.includes(symbol))) continue;
-        locations.push(isRange ? { path: node.path, startLine: range[0], endLine: range[1] } : { path: node.path });
-    }
-    locations.sort((a, b) => a.path.localeCompare(b.path));
+    const locations = files
+        .map(node => findSymbolLocation(node, symbol))
+        .filter(Boolean)
+        .sort((a, b) => a.path.localeCompare(b.path));
     return { symbol, found: locations.length > 0, locations };
 }
 
@@ -157,7 +114,23 @@ export function fileLookup(graph, ref) {
     return { file: wanted, exists, similar };
 }
 
-const names = (node) => [...new Set((node?.exports ?? node?.metadata?.exports ?? []).filter(name => typeof name === 'string'))].sort();
+const names = (node) => [...new Set((node?.exports || node?.metadata?.exports || []).filter(name => typeof name === 'string'))].sort();
+
+function buildInterfaceEntry(graph, ref, maxImports, maxNames) {
+    const resolved = resolveCodeFile(graph, ref);
+    if (!resolved.node) return null;
+    const imported = importsOf(graph, resolved.node.path).files;
+    const shown = imported.slice(0, maxImports).map(file => {
+        const all = names(resolveCodeFile(graph, file).node);
+        return { file, exports: all.slice(0, maxNames), moreExports: Math.max(0, all.length - maxNames) };
+    });
+    return {
+        file: resolved.node.path,
+        exports: names(resolved.node),
+        imports: shown,
+        moreImports: Math.max(0, imported.length - shown.length)
+    };
+}
 
 /**
  * What the coder may rely on: per file in scope its exports and what each imported module exports.
@@ -165,18 +138,9 @@ const names = (node) => [...new Set((node?.exports ?? node?.metadata?.exports ??
  * @returns {Array<{file: string, exports: string[], imports: Array<{file: string, exports: string[], moreExports: number}>, moreImports: number}>}
  */
 export function scopeInterfaces(graph, files, { maxImports = 8, maxNames = 15 } = {}) {
-    const result = [];
-    for (const ref of files) {
-        const resolved = resolveCodeFile(graph, ref);
-        if (!resolved.node) continue;
-        const imported = importsOf(graph, resolved.node.path).files;
-        const shown = imported.slice(0, maxImports).map(file => {
-            const all = names(resolveCodeFile(graph, file).node);
-            return { file, exports: all.slice(0, maxNames), moreExports: Math.max(0, all.length - maxNames) };
-        });
-        result.push({ file: resolved.node.path, exports: names(resolved.node), imports: shown, moreImports: Math.max(0, imported.length - shown.length) });
-    }
-    return result;
+    return files
+        .map(ref => buildInterfaceEntry(graph, ref, maxImports, maxNames))
+        .filter(Boolean);
 }
 
 /** Plain text for a prompt, whole lines only (never cut mid-line, no "..." markers). */
@@ -198,6 +162,15 @@ export function renderScopeInterfaces(entries, { maxChars = 3000 } = {}) {
     return `${kept.join('\n')}\nOnly these names exist; do not call a name that is not listed. If you need another one, find it with graph_query first.`;
 }
 
+const isSearchableCodeNode = (node) => node.type === 'CodeFile' && node.kind !== 'test' && Boolean(node.path);
+
+function locateSymbolsInNode(node, wanted) {
+    if (!isSearchableCodeNode(node)) return [];
+    const ranges = node.symbolRanges || node.metadata?.symbolRanges;
+    if (!ranges) return [];
+    return wanted.filter(name => Array.isArray(ranges[name])).map(name => ({ name, path: node.path, startLine: ranges[name][0], endLine: ranges[name][1] }));
+}
+
 /**
  * Symbol -> where it lives: the identifiers named in `text` that a source file declares, with path and
  * 1-based line range, so the coder reads only those lines. Whole identifiers, case-sensitive; tests are not "where it lives".
@@ -207,15 +180,6 @@ export function locateSymbols(nodes, text, { limit = 8 } = {}) {
     const rawMatches = String(text ?? '').match(/[A-Za-z_$][\w$]*/g);
     if (!rawMatches || !rawMatches.length) return [];
     const wanted = [...new Set(rawMatches)];
-    const found = [];
-    for (const node of nodes) {
-        if (node.type !== 'CodeFile' || node.kind === 'test' || !node.path) continue;
-        const ranges = node.symbolRanges ?? node.metadata?.symbolRanges;
-        if (!ranges) continue;
-        for (const name of wanted) {
-            const range = ranges[name];
-            if (Array.isArray(range)) found.push({ name, path: node.path, startLine: range[0], endLine: range[1] });
-        }
-    }
+    const found = nodes.flatMap(node => locateSymbolsInNode(node, wanted));
     return found.sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)).slice(0, limit);
 }

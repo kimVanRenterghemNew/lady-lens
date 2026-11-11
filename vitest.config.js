@@ -15,8 +15,10 @@ export default defineConfig({
             include: ['core/**/*.js', 'ui/**/*.mjs'],
             exclude: [ "**/index.js" ],
             reportsDirectory: 'outputs/coverage',
+            // json-summary: `health` reads it (outputs/coverage/coverage-summary.json), so a file covered through another counts as tested
+            reporter: ['text', 'html', 'clover', 'json', 'json-summary'],
             // Ratchet: raise these as code lands, never lower them to get green!!
-            thresholds: { statements: 93, branches: 84, functions: 93, lines: 96 },
+            thresholds: { statements: 94, branches: 86, functions: 94, lines: 96 },
         },
     },
 });

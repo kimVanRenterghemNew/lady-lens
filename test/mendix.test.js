@@ -7,7 +7,15 @@ vi.mock('child_process', () => ({
     execFile: vi.fn((file, args, options, callback) => {
         if (String(file).includes('missing')) return callback(new Error('mxcli not found'));
         const command = args[0];
-        if (process.env.LENS_MXCLI_MODE === 'tree-only' && command !== 'project-tree') return callback(null, { stdout: 'null' });
+        const mode = process.env.LENS_MXCLI_MODE;
+        if (mode === 'tree-only' && command !== 'project-tree') return callback(null, { stdout: 'null' });
+        const sql = command === '-c' ? String(args[1]) : '';
+        if (mode === 'no-limit' && sql.includes(' LIMIT ')) return callback(new Error('syntax error near LIMIT'));
+        const page = sql.match(/LIMIT (\d+) OFFSET (\d+)$/);
+        if (mode === 'many' && sql.includes('CATALOG.widgets')) {
+            const all = Array.from({ length: 1200 }, (_, i) => ({ page: 'Sales.Big', widget: `w${i}`, widgetType: 'Forms$TextBox', attribute: `Sales.E.a${i}` }));
+            return callback(null, { stdout: JSON.stringify(all.slice(Number(page[2]), Number(page[2]) + Number(page[1]))) });
+        }
         const json = command === '-c'
             ? String(args[1]).includes('CATALOG.attributes')
                 ? [{ entity: 'Sales.Equipment', name: 'ERPLocation' }]
@@ -21,7 +29,8 @@ vi.mock('child_process', () => ({
     })
 }));
 
-import { findMendixProject, mendixContributor } from '../core/graph/index.js';
+import { findMendixProject, mendixContributor, mendixChanged, createGraphSync, createGraphRepository, createMemoryRepositoryStore } from '../core/graph/index.js';
+const hasSqlite = await import('node:sqlite').then(() => true, () => false); // Node 22.13+ (22.5+ behind a flag)
 
 const roots = [];
 const makeRoot = () => {
@@ -81,7 +90,7 @@ describe('Mendix mxcli contributor', () => {
         expect(result.relations).toContainEqual({ from: 'mendix:page:Sales.Equipment_New', to: 'mendix:field:Sales.Equipment_New.txtLocation', type: 'CONTAINS' });
     });
 
-    it('writes the MDL text of every document from the catalog to .mxcli/mdl, so grep finds widget settings', async () => {
+    it.skipIf(!hasSqlite)('writes the MDL text of every document from the catalog to .mxcli/mdl, so grep finds widget settings', async () => {
         const { DatabaseSync } = await import('node:sqlite');
         const root = makeRoot();
         fs.writeFileSync(path.join(root, 'App.mpr'), 'binary placeholder');
@@ -152,5 +161,105 @@ describe('Mendix contribution cache', () => {
         fs.writeFileSync(path.join(root, '.mxcli', 'lens-contribution.json'), '{broken');
         process.env.LENS_MXCLI_PATH = 'test-mxcli';
         expect((await mendixContributor({ root })).nodes.some(node => node.type === 'MendixProject')).toBe(true);
+    });
+    it('asks the page widgets in pages of 500, so the 10,000-line output limit of mxcli is never hit', async () => {
+        const root = makeRoot();
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'binary placeholder');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        process.env.LENS_MXCLI_MODE = 'many';
+        const fields = (await mendixContributor({ root })).nodes.filter(node => node.type === 'MendixPageField');
+        expect(fields).toHaveLength(1200);
+        expect(new Set(fields.map(field => field.name)).size).toBe(1200);
+    });
+
+    it('asks in one query when mxcli does not know LIMIT', async () => {
+        const root = makeRoot();
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'binary placeholder');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        process.env.LENS_MXCLI_MODE = 'no-limit';
+        expect((await mendixContributor({ root })).nodes.filter(node => node.type === 'MendixPageField').map(field => field.name)).toEqual(['txtLocation', 'txtBin', 'btnSave']);
+    });
+
+    it('a changed model (also in mprcontents/ of an MPR v2 project) means the cached answer is stale', async () => {
+        const root = makeRoot();
+        expect(mendixChanged(root)).toBe(false); // not Mendix
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'small v2 mpr');
+        fs.mkdirSync(path.join(root, 'mprcontents', 'ab'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'mprcontents', 'ab', 'unit1.mxunit'), 'one');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        expect(mendixChanged(root)).toBe(true);
+        await mendixContributor({ root });
+        expect(mendixChanged(root)).toBe(false);
+        fs.writeFileSync(path.join(root, 'mprcontents', 'ab', 'unit2.mxunit'), 'two');
+        expect(mendixChanged(root)).toBe(true);
+    });
+
+    it('a result cached when the MDL export could not run (Node 18) is stale once it can, and the other way round', async () => {
+        const root = makeRoot();
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'binary placeholder');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        await mendixContributor({ root });
+        expect(mendixChanged(root)).toBe(false);
+        const cache = path.join(root, '.mxcli', 'lens-contribution.json');
+        const cached = JSON.parse(fs.readFileSync(cache, 'utf8'));
+        const other = hasSqlite ? 'mdl=false' : 'mdl=true';
+        fs.writeFileSync(cache, JSON.stringify({ ...cached, key: cached.key.replace(/mdl=(true|false)$/, other) }));
+        expect(mendixChanged(root)).toBe(true);
+    });
+});
+
+describe('Mendix project sync', () => {
+    it('is incremental: nothing changed writes nothing, a changed model alone makes the sync ask mxcli and write', async () => {
+        const root = makeRoot();
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'small v2 mpr');
+        fs.mkdirSync(path.join(root, 'javascriptsource'));
+        fs.writeFileSync(path.join(root, 'javascriptsource', 'a.js'), 'export const a = 1;\n');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        const settings = { project: { graph_roots: ['.'], exclude_dirs: ['.mxcli'], graph_extensions: ['.js'] }, graph: { ast: { enabled: false } } };
+        const repository = createGraphRepository({ store: createMemoryRepositoryStore() });
+        const sync = createGraphSync({ root, settings, repository });
+        const mendixNodes = async () => (await repository.loadGraph({ scopes: ['project'] })).nodes.filter(node => String(node.type).startsWith('Mendix')).length;
+        expect(await sync.syncFiles()).toMatchObject({ wrote: true, added: 1 });
+        expect(await sync.syncFiles()).toMatchObject({ wrote: false, unchanged: 1 });
+        const before = await mendixNodes();
+        expect(before).toBeGreaterThan(0);
+        fs.mkdirSync(path.join(root, 'mprcontents'));
+        fs.writeFileSync(path.join(root, 'mprcontents', 'unit.mxunit'), 'changed model');
+        process.env.LENS_MXCLI_MODE = 'tree-only'; // the changed model has fewer elements: the stale ones go, the rest stay
+        expect(await sync.syncFiles()).toMatchObject({ wrote: true, added: 0, updated: 0 });
+        const after = await mendixNodes();
+        expect(after).toBeGreaterThan(0);
+        expect(after).toBeLessThan(before);
+        expect(mendixChanged(root)).toBe(false);
+    });
+
+    const syncOf = (root) => {
+        const settings = { project: { graph_roots: ['.'], exclude_dirs: ['.mxcli'], graph_extensions: ['.js'] }, graph: { ast: { enabled: false } } };
+        const repository = createGraphRepository({ store: createMemoryRepositoryStore() });
+        return { repository, sync: createGraphSync({ root, settings, repository }) };
+    };
+
+    it('stores Mendix relations under their relation name (CONTAINS, REFERENCES)', async () => {
+        const root = makeRoot();
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'small v2 mpr');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        const { repository, sync } = syncOf(root);
+        await sync.syncFiles();
+        const { edges } = await repository.loadGraph({ scopes: ['project'] });
+        const mendixEdges = edges.filter(edge => String(edge.from).startsWith('mendix:'));
+        expect(mendixEdges.length).toBeGreaterThan(0);
+        expect(mendixEdges.every(edge => ['CONTAINS', 'REFERENCES'].includes(edge.type))).toBe(true);
+    });
+
+    it('without a working mxcli a no-change sync still writes nothing', async () => {
+        const root = makeRoot();
+        fs.writeFileSync(path.join(root, 'App.mpr'), 'small v2 mpr');
+        fs.mkdirSync(path.join(root, 'javascriptsource'));
+        fs.writeFileSync(path.join(root, 'javascriptsource', 'a.js'), 'export const a = 1;\n');
+        process.env.LENS_MXCLI_PATH = 'missing-mxcli';
+        const { sync } = syncOf(root);
+        expect(await sync.syncFiles()).toMatchObject({ wrote: true, added: 1 });
+        expect(mendixChanged(root)).toBe(false);
+        expect(await sync.syncFiles()).toMatchObject({ wrote: false, unchanged: 1 });
     });
 });

@@ -1,0 +1,65 @@
+<!-- The stack trace tab of `lens ui`, inserted into graph-ui.html by graph-ui.mjs: paste a trace, see each frame's file,
+     line, function and code; a frame opens its code or its flow diagram, where the frames of the trace are marked. -->
+<script>
+const traceCode = async (el, path, line) => {
+  const r = await ask('read_chunk', { path, startLine: Math.max(1, line - 2), endLine: line + 2 });
+  if (r.error || typeof r.content !== 'string') { el.innerHTML = `<span class="muted">${esc(r.error || 'geen code')}</span>`; return; }
+  const start = r.startLine || 1;
+  el.innerHTML = r.content.split('\n').map((l, i) => `<span class="${start + i === line ? 'hit' : ''}"><span class="ln">${start + i}</span>${esc(l)}</span>`).join('\n');
+};
+
+const frameHead = f => `<span class="badge ${f.status}">${{ project: 'project', ambiguous: 'kies', notFound: 'niet gevonden', library: 'bibliotheek' }[f.status]}</span> ` +
+  `<strong>${esc(f.symbol || f.name || '(anoniem)')}</strong> ` +
+  (f.path ? `<a class="ln-link" data-path="${esc(f.path)}" data-line="${f.line}">${esc(f.path)}:${f.line}</a> <a class="ln-link" data-tab="graph" data-path="${esc(f.path)}" data-line="${f.line}">stroomschema ›</a>` : `<span class="muted">${esc(f.file || '')}${f.line ? ':' + f.line : ''}</span>`);
+
+const frameHtml = (f, i) => {
+  if (f.status === 'project') return `<div class="trace-frame${f.start ? ' start' : ''}" data-i="${i}">${frameHead(f)}<pre class="code trace-code" data-path="${esc(f.path)}" data-line="${f.line}">…</pre></div>`;
+  if (f.status === 'ambiguous') return `<div class="trace-frame" data-i="${i}">${frameHead(f)}<div class="muted">Meerdere bestanden passen: ` +
+    f.candidates.map((c, k) => `<button class="trace-pick" data-i="${i}" data-k="${k}">${esc(c.path)}</button>`).join(' ') + `</div></div>`;
+  return `<div class="trace-frame" data-i="${i}">${frameHead(f)}</div>`;
+};
+
+// Consecutive library frames fold into one closed group; the rest keeps the order of the trace.
+const framesHtml = frames => {
+  let html = '', lib = [];
+  const flush = () => { if (lib.length) html += `<details class="trace-lib"><summary>${lib.length} bibliotheekframe(s)</summary>${lib.join('')}</details>`; lib = []; };
+  frames.forEach((f, i) => { if (f.status === 'library') lib.push(frameHtml(f, i)); else { flush(); html += frameHtml(f, i); } });
+  flush();
+  return html;
+};
+
+define('lens-trace', {
+  wire() {
+    this.innerHTML = `<div class="search-sidebar trace-pane"><textarea id="trace-in" placeholder="Plak een stacktrace (Node, .NET, Python of Java)"></textarea><div id="trace-out" class="results-pane"><p class="muted">Plak een stacktrace: elk frame toont bestand, regel, functie en code.</p></div></div>`;
+    const input = this.querySelector('#trace-in'), out = this.querySelector('#trace-out');
+    let frames = [], seq = 0, timer;
+    const mark = () => { traceMarks = new Set(frames.filter(f => f.status === 'project' && f.symbol).map(f => `${f.path}#${f.symbol}`)); };
+    const fill = root => root.querySelectorAll('.trace-code').forEach(el => traceCode(el, el.dataset.path, Number(el.dataset.line)));
+    const run = async () => {
+      const mine = ++seq, text = input.value;
+      if (!text.trim()) { out.innerHTML = ''; return; }
+      const res = await fetch(api('/api/trace'), { method: 'POST', body: text }).then(r => r.json());
+      if (mine !== seq) return;
+      if (res.error) { out.innerHTML = `<p class="muted">${esc(res.error)}</p>`; return; }
+      frames = res.frames;
+      mark();
+      const c = res.counts;
+      out.innerHTML = frames.length ? `<p class="muted">${frames.length} frames · ${c.project} in project · ${c.ambiguous} te kiezen · ${c.notFound} niet gevonden · ${c.library} bibliotheek</p>` + framesHtml(frames) : '<p class="muted">Geen frames herkend.</p>';
+      fill(out);
+      out.querySelector('.trace-frame.start')?.scrollIntoView({ block: 'nearest' });
+    };
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 120); });
+    out.addEventListener('click', e => {
+      const pick = e.target.closest('.trace-pick');
+      if (!pick) return;
+      const f = frames[pick.dataset.i];
+      Object.assign(f, f.candidates[pick.dataset.k], { status: 'project' });
+      const el = out.querySelector(`.trace-frame[data-i="${pick.dataset.i}"]`);
+      el.outerHTML = frameHtml(f, Number(pick.dataset.i));
+      mark();
+      fill(out.querySelector(`.trace-frame[data-i="${pick.dataset.i}"]`));
+    });
+  },
+  load() { this.querySelector('#trace-in')?.focus(); return Promise.resolve(); }
+});
+</script>

@@ -27,7 +27,7 @@ const DEFAULT_SETTINGS = {
     },
     graph: {
         freshness: { default_max_age_days: 30 },
-        ast: { enabled: true },
+        ast: { enabled: false }, // the full syntax tree is ~9x the source and nothing reads it back; on, a vendored bundle filled the Ladybug buffer
         documentation: { enabled: true },
         links: { enabled: true }
     }

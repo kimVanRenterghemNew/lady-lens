@@ -182,6 +182,26 @@ export function findSemanticMatches(graph, query, opts = {}) {
  * @param {Graph} graph - Graph instance (for edge traversal)
  * @returns {string} Markdown context block
  */
+function renderConceptNode(node) {
+  const confidence = node.confidence ? ` (confidence: ${node.confidence.toFixed(2)})` : '';
+  const parts = [`### ${node.title}${confidence}`, node.content];
+  if (node.topics && node.topics.length > 0) parts.push(`**Topics**: ${node.topics.join(', ')}`);
+  return parts.join('\n');
+}
+
+function renderDecisionNode(node) {
+  const parts = [`### ${node.title}`, `**Status**: ${node.status || 'active'}`];
+  if (node.consequences) parts.push(`**Consequences**: ${node.consequences}`);
+  if (node.risks) parts.push(`**Risks**: ${node.risks}`);
+  return parts.join('\n');
+}
+
+function renderModuleNode(node) {
+  const parts = [`### ${node.path}`];
+  if (node.purpose) parts.push(`**Purpose**: ${node.purpose}`);
+  return parts.join('\n');
+}
+
 export function buildContextMarkdown(nodes) {
   if (!nodes || nodes.length === 0) {
     return '(No matching concepts found)';
@@ -189,49 +209,19 @@ export function buildContextMarkdown(nodes) {
 
   const sections = [];
 
-  // Extracted Concepts
   const extracted = nodes.filter(n => n.type === 'Concept');
   if (extracted.length > 0) {
-    sections.push('## Extracted Concepts\n');
-    for (const node of extracted) {
-      const confidence = node.confidence ? ` (confidence: ${node.confidence.toFixed(2)})` : '';
-      sections.push(`### ${node.title}${confidence}`);
-      sections.push(node.content);
-      if (node.topics && node.topics.length > 0) {
-        sections.push(`**Topics**: ${node.topics.join(', ')}`);
-      }
-      sections.push('');
-    }
+    sections.push(`## Extracted Concepts\n\n${extracted.map(renderConceptNode).join('\n\n')}\n`);
   }
 
-  // App-native Decisions
   const decisions = nodes.filter(n => n.type === 'Decision');
   if (decisions.length > 0) {
-    sections.push('## Decisions\n');
-    for (const node of decisions) {
-      sections.push(`### ${node.title}`);
-      sections.push(`**Status**: ${node.status || 'active'}`);
-      if (node.consequences) {
-        sections.push(`**Consequences**: ${node.consequences}`);
-      }
-      if (node.risks) {
-        sections.push(`**Risks**: ${node.risks}`);
-      }
-      sections.push('');
-    }
+    sections.push(`## Decisions\n\n${decisions.map(renderDecisionNode).join('\n\n')}\n`);
   }
 
-  // Modules
   const modules = nodes.filter(n => n.type === 'Module');
   if (modules.length > 0) {
-    sections.push('## Affected Modules\n');
-    for (const node of modules) {
-      sections.push(`### ${node.path}`);
-      if (node.purpose) {
-        sections.push(`**Purpose**: ${node.purpose}`);
-      }
-      sections.push('');
-    }
+    sections.push(`## Affected Modules\n\n${modules.map(renderModuleNode).join('\n\n')}\n`);
   }
 
   return sections.join('\n').trim();

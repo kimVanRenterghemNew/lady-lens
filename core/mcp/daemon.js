@@ -88,7 +88,7 @@ export function existingDaemonMessage({ info, mcpBusy, uiBusy, port }) {
 
 function killPid(target) {
     try {
-        if (process.platform === 'win32') execSync(`taskkill /pid ${target} /T /F`, { stdio: 'ignore' });
+        if (process.platform === 'win32') execSync(`taskkill /pid ${target} /T /F`, { stdio: 'ignore', windowsHide: true });
         else process.kill(target, 'SIGTERM');
     } catch { /* process may already be gone */ }
 }
@@ -98,8 +98,11 @@ function stopWindowsLadyLensProcesses() {
     if (process.platform !== 'win32' || process.env.VITEST) return 0;
     try {
         const command = "$p = Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | Where-Object { $_.CommandLine -match 'lens\\.mjs|node_modules[\\\\/]lady-lens[\\\\/]' } | Select-Object -ExpandProperty ProcessId; $p";
+        // spare this process, its parent and the lens command that asked for the stop (`lens update`, `lens node`: through a
+        // shell, and with a chosen Node a second process that started the first), or the sweep kills the command itself
+        const keep = new Set([process.pid, process.ppid, ...String(process.env.LENS_KEEP_PIDS || '').split(',').map(Number)]);
         const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true });
-        const pids = [...new Set(String(output).split(/\r?\n/).map(value => Number(value.trim())).filter(pid => pid > 0 && pid !== process.pid))];
+        const pids = [...new Set(String(output).split(/\r?\n/).map(value => Number(value.trim())).filter(pid => pid > 0 && !keep.has(pid)))];
         pids.forEach(killPid);
         return pids.length;
     } catch {
@@ -146,6 +149,14 @@ export function daemonCommand(command, args, daemonFile = DAEMON_FILE) {
     return { text: result.error || result.message || 'Daemon not running', code: result.error ? 1 : 0 };
 }
 
+function killDaemonPid(pid) {
+    if (process.platform === 'win32') {
+        try { execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore', windowsHide: true }); } catch { process.kill(pid, 'SIGKILL'); }
+        return;
+    }
+    process.kill(pid, 'SIGTERM');
+}
+
 export function stopDaemon(daemonFile = DAEMON_FILE) {
     const info = readDaemonInfo(daemonFile);
     if (!info) {
@@ -161,20 +172,15 @@ export function stopDaemon(daemonFile = DAEMON_FILE) {
     if (!isProcessRunning(pid)) {
         const staleOwners = extraPids;
         staleOwners.forEach(killPid);
+        // the agents' stdio servers still hold the native module open (npm update: EBUSY), also when the daemon is gone
+        const swept = daemonFile === DAEMON_FILE ? stopWindowsLadyLensProcesses() : 0;
         clearDaemonInfo(daemonFile);
-        return { running: false, stopped: staleOwners.length > 0, message: `lady-lens daemon (PID: ${pid}) was not running (stale lock cleared${staleOwners.length ? `; stopped ${staleOwners.length} port owner(s)` : ''})` };
+        const stopped = staleOwners.length + swept;
+        return { running: false, stopped: stopped > 0, message: `lady-lens daemon (PID: ${pid}) was not running (stale lock cleared${stopped ? `; stopped ${stopped} remaining lady-lens process(es)` : ''})` };
     }
 
     try {
-        if (process.platform === 'win32') {
-            try {
-                execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
-            } catch {
-                process.kill(pid, 'SIGKILL');
-            }
-        } else {
-            process.kill(pid, 'SIGTERM');
-        }
+        killDaemonPid(pid);
     } catch (err) {
         return { running: false, error: `Failed to stop PID ${pid}: ${err.message}` };
     }

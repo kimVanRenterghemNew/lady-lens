@@ -23,6 +23,29 @@ const t0Gen = Date.now();
 const FILES_PER_MODULE = 50;
 const numModules = Math.ceil(count / FILES_PER_MODULE);
 
+function writeModuleTest(tmpDir, m, f) {
+    if (f % 5 !== 0) return;
+    const testDir = path.join(tmpDir, 'test', `mod_${m}`);
+    fs.mkdirSync(testDir, { recursive: true });
+    const testContent = `import { describe, it } from 'vitest';
+import { func_${m}_${f} } from '../../src/mod_${m}/file_${f}.js';
+
+describe('mod_${m}_file_${f}', () => {
+    it('works', () => {
+        func_${m}_${f}();
+    });
+});
+`;
+    fs.writeFileSync(path.join(testDir, `file_${f}.test.js`), testContent, 'utf8');
+}
+
+function writeModuleDoc(tmpDir, m, f) {
+    if (f % 20 !== 0) return;
+    const docDir = path.join(tmpDir, 'docs');
+    fs.mkdirSync(docDir, { recursive: true });
+    fs.writeFileSync(path.join(docDir, `doc_${m}_${f}.md`), `# Document for mod_${m} file_${f}\n\nDetails about func_${m}_${f}.\n`, 'utf8');
+}
+
 let fileCount = 0;
 for (let m = 0; m < numModules && fileCount < count; m++) {
     const modDir = path.join(tmpDir, 'src', `mod_${m}`);
@@ -40,29 +63,8 @@ export function func_${m}_${f}() {
 }
 `;
         fs.writeFileSync(path.join(modDir, `file_${f}.js`), content, 'utf8');
-
-        // Test every 5 files
-        if (f % 5 === 0) {
-            const testDir = path.join(tmpDir, 'test', `mod_${m}`);
-            fs.mkdirSync(testDir, { recursive: true });
-            const testContent = `import { describe, it } from 'vitest';
-import { func_${m}_${f} } from '../../src/mod_${m}/file_${f}.js';
-
-describe('mod_${m}_file_${f}', () => {
-    it('works', () => {
-        func_${m}_${f}();
-    });
-});
-`;
-            fs.writeFileSync(path.join(testDir, `file_${f}.test.js`), testContent, 'utf8');
-        }
-
-        // Doc every 20 files
-        if (f % 20 === 0) {
-            const docDir = path.join(tmpDir, 'docs');
-            fs.mkdirSync(docDir, { recursive: true });
-            fs.writeFileSync(path.join(docDir, `doc_${m}_${f}.md`), `# Document for mod_${m} file_${f}\n\nDetails about func_${m}_${f}.\n`, 'utf8');
-        }
+        writeModuleTest(tmpDir, m, f);
+        writeModuleDoc(tmpDir, m, f);
     }
 }
 

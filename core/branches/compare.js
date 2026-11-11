@@ -30,15 +30,20 @@ function parse(source, filePath) {
 
 const baseName = name => name.replace(/#\d+$/, '');
 
+const changeOf = (name, current, old, file) => {
+    if (!old) return { file, name, change: 'added', line: current.line, body: current.body };
+    if (old.hash !== current.hash) return { file, name, change: 'modified', line: current.line };
+    return null;
+};
+
 function functionChanges(before, after, filePath, oldPath) {
-    const changes = [];
-    for (const [name, { hash, body, line }] of after.functions) {
-        const old = before.functions.get(name);
-        if (!old) changes.push({ file: filePath, name, change: 'added', line, body });
-        else if (old.hash !== hash) changes.push({ file: filePath, name, change: 'modified', line });
-    }
-    for (const [name, { body, line }] of before.functions) if (!after.functions.has(name)) changes.push({ file: oldPath, name, change: 'removed', line, body });
-    return changes;
+    const addedOrModified = [...after.functions]
+        .map(([name, current]) => changeOf(name, current, before.functions.get(name), filePath))
+        .filter(Boolean);
+    const removed = [...before.functions]
+        .filter(([name]) => !after.functions.has(name))
+        .map(([name, { body, line }]) => ({ file: oldPath, name, change: 'removed', line, body }));
+    return [...addedOrModified, ...removed];
 }
 
 /** Functions added, removed and modified between two versions of one file (no rename detection). */
@@ -62,22 +67,32 @@ function similarity(a, b) {
 function pairRenames(changes, renamedFiles) {
     const removed = changes.filter(change => change.change === 'removed');
     const added = changes.filter(change => change.change === 'added');
-    const candidates = [];
-    for (const gone of removed) {
-        for (const fresh of added) {
-            if (gone.file !== fresh.file && renamedFiles.get(gone.file) !== fresh.file) continue;
-            const a = words(gone.body, gone.name);
-            const b = words(fresh.body, fresh.name);
-            const strip = ({ body, name }) => body.split(baseName(name)).join('');
-            candidates.push({ gone, fresh, score: similarity(a, b), bodyChanged: strip(gone) !== strip(fresh) });
-        }
-    }
+    const isSameOrRenamedFile = (gone, fresh) => gone.file === fresh.file || renamedFiles.get(gone.file) === fresh.file;
+    const strip = ({ body, name }) => body.split(baseName(name)).join('');
+
+    const candidates = removed.flatMap(gone =>
+        added
+            .filter(fresh => isSameOrRenamedFile(gone, fresh))
+            .map(fresh => ({
+                gone,
+                fresh,
+                score: similarity(words(gone.body, gone.name), words(fresh.body, fresh.name)),
+                bodyChanged: strip(gone) !== strip(fresh)
+            }))
+    );
+
     const used = new Set();
     const renamed = [];
-    for (const { gone, fresh, score, bodyChanged } of candidates.sort((x, y) => y.score - x.score)) {
-        if (score < RENAME_SIMILARITY || used.has(gone) || used.has(fresh)) continue;
-        used.add(gone); used.add(fresh);
-        renamed.push({ file: fresh.file, name: fresh.name, change: 'renamed', oldName: gone.name, oldFile: gone.file, line: fresh.line, bodyChanged });
+    const sortedCandidates = candidates
+        .filter(c => c.score >= RENAME_SIMILARITY)
+        .sort((x, y) => y.score - x.score);
+
+    for (const { gone, fresh, bodyChanged } of sortedCandidates) {
+        if (!used.has(gone) && !used.has(fresh)) {
+            used.add(gone);
+            used.add(fresh);
+            renamed.push({ file: fresh.file, name: fresh.name, change: 'renamed', oldName: gone.name, oldFile: gone.file, line: fresh.line, bodyChanged });
+        }
     }
     return [...changes.filter(change => !used.has(change)), ...renamed];
 }

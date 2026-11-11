@@ -1,3 +1,5 @@
+import os from 'os';
+import path from 'path';
 import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -55,7 +57,7 @@ describe('MCP server for lady-lens', () => {
         expect(grepSchema.inputSchema.properties.repo).toBeDefined();
         // a client can tell reading tools from writing ones (MCP readOnlyHint)
         const readOnly = Object.fromEntries(tools.map(t => [t.name, t.annotations?.readOnlyHint]));
-        expect(readOnly).toMatchObject({ grep: true, graph_query: true, discussion_query: true, discussion_save: false, discussion_edit: false, repo_sync: false, config_update: false, branch_diff: true });
+        expect(readOnly).toMatchObject({ mendix_diff: true, grep: true, graph_query: true, discussion_query: true, discussion_save: false, discussion_edit: false, repo_sync: false, config_update: false, branch_diff: true });
 
         // 2. Call discussion_build
         const buildResult = await client.callTool({
@@ -163,5 +165,13 @@ describe('MCP server for lady-lens', () => {
 
         await client.close();
         await server.close();
+    });
+
+    // MCP smoke test (2026-11-11): Streamable HTTP builds a server per request; one built while another call ran switched
+    // that call to the daemon's default repo, and nine tools answered from another repository's database
+    it('building a server leaves the active repo alone (only a tool call activates one, inside the lock)', () => {
+        const before = [process.env.LENS_REPO_ROOT, process.env.LENS_GRAPH_DB];
+        createLadyLensMcpServer({ defaultRepo: path.join(os.tmpdir(), 'lens-some-other-repo') });
+        expect([process.env.LENS_REPO_ROOT, process.env.LENS_GRAPH_DB]).toEqual(before);
     });
 });

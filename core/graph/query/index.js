@@ -1,5 +1,5 @@
 export { query, buildContextFromGraph, validateGraph, answerNode } from './graphQuery.js';
-export { asksForDocuments, rankGraphNodes, termWeights, typoCorrections, tokenize as tokenizeQuery, tokenize as tokenize, IDF_MIN_NODES } from './graphRank.js';
+export { asksForDocuments, nodeMatchesKind, rankGraphNodes, termWeights, typoCorrections, tokenize as tokenizeQuery, tokenize as tokenize, IDF_MIN_NODES } from './graphRank.js';
 export { findSemanticMatches, buildContextMarkdown, levenshteinDistance, semanticSimilarity, matchesTopics, getSupersededBy, isCurrentConcept } from './graphSemantic.js';
 export { buildContextFromGraph as generateContextBlock } from './graphContext.js';
 export { definedIn, recognizeSymbolQuestion, exportsOf, fileLookup, importersOf, importsOf, resolveCodeFile, isImportEdgeType, looksLikeRepoPath, recognizeImportQuestion, scopeInterfaces, renderScopeInterfaces, locateSymbols, IMPORT_EDGE } from './importLookup.js';

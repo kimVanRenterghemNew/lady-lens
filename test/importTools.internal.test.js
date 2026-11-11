@@ -171,3 +171,21 @@ describe('Kura 2026-11-04: tool schemas say who uses them and whether they write
         expect(RESEARCH_TOOL_SCHEMAS.find(schema => schema.name === 'grep').readOnly).toBe(true);
     });
 });
+
+describe('graph_query input validation and error branches', () => {
+    it('rejects non-string node or query', async () => {
+        expect(await graph_query({ node: 123 })).toEqual({ error: 'node and query must be strings when provided' });
+    });
+    it('rejects empty input without node or query', async () => {
+        expect(await graph_query({})).toEqual({ error: 'graph_query requires node or query' });
+    });
+    it('rejects invalid sessionId', async () => {
+        expect(await graph_query({ query: 'test', sessionId: 'bad id!' })).toEqual({
+            error: 'sessionId must contain only letters, numbers, dots, dashes, or underscores'
+        });
+    });
+    it('handles queryGraph error when invalid query parameters are given', async () => {
+        const res = await graph_query({ node: 'core/a.js', path: 123 });
+        expect(res.error).toContain('invalid graph query:');
+    });
+});

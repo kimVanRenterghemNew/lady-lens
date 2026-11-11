@@ -17,14 +17,23 @@ export function fitToBudget(result, { lists = [], texts = [], narrow = 'narrow t
     for (const key of lists) {
         if (Array.isArray(fitted[key])) fitted[key] = [...fitted[key]];
     }
-    let omitted = 0;
-    while (size(fitted) > toolResultChars - 160) {
+    const cut = cutLists(fitted, lists, toolResultChars - 160, size);
+    const omitted = cut.reduce((sum, { left }) => sum + left, 0);
+    // say per list what is shown: `matchCount: 8` next to 3 nodes read as a bug without it
+    const shown = cut.filter(({ left }) => left).map(({ key, kept, left }) => `${key} ${kept} of ${kept + left}`).join(', ');
+    return { ...fitted, truncated: true, ...(omitted ? { omitted } : {}), hint: `Result cut to the context budget${shown ? ` (${shown})` : ''}: ${narrow}.` };
+}
+
+/** Drop items from the end of the last non-empty list until the result fits; per list how many were kept and left out. */
+function cutLists(fitted, lists, max, size) {
+    const left = new Map(lists.map(key => [key, 0]));
+    while (size(fitted) > max) {
         const key = [...lists].reverse().find(name => Array.isArray(fitted[name]) && fitted[name].length);
         if (!key) break;
         fitted[key].pop();
-        omitted += 1;
+        left.set(key, left.get(key) + 1);
     }
-    return { ...fitted, truncated: true, ...(omitted ? { omitted } : {}), hint: `Result cut to the context budget: ${narrow}.` };
+    return lists.map(key => ({ key, kept: Array.isArray(fitted[key]) ? fitted[key].length : 0, left: left.get(key) }));
 }
 
 export const withBudget = (fn, shape) => (args) => {

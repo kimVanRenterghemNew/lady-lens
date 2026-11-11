@@ -7,6 +7,9 @@
 // Graph & Engine ports
 export * from './core/graph/index.js';
 
+// Mendix models read from git: mendixDiff({ from, to, root }) gives a branch's model changes as data
+export { mendixDiff, readMendixModel, elementChanges, flowGraph } from './core/mendix/index.js';
+
 // Search, Research & Query ports
 export {
     RESEARCH_TOOLS,

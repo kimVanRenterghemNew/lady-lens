@@ -2,6 +2,48 @@
 import fs from 'fs';
 import { parseJson, rowToNode, rowToEdge } from '../../model/index.js';
 
+function toDefinedLocation(row, symbol) {
+    const meta = parseJson(row.metadata_json, {});
+    const range = meta.symbolRanges?.[symbol];
+    if (Array.isArray(range)) return { path: row.path, startLine: range[0], endLine: range[1] };
+    return isExportedSymbol(meta, symbol) ? { path: row.path } : null;
+}
+
+const isExportedSymbol = (meta, symbol) => Array.isArray(meta.exports) && meta.exports.includes(symbol);
+
+function extractExportNames(row) {
+    const meta = parseJson(row.metadata_json, {});
+    return [...new Set((meta.exports || []).filter(n => typeof n === 'string'))].sort();
+}
+
+const findExactRow = (rows, wanted) =>
+    rows.find(r => r.path === wanted) ?? rows.find(r => r.path.toLowerCase() === wanted.toLowerCase());
+
+function resolveMatchedRow(rows, wanted) {
+    const exact = findExactRow(rows, wanted);
+    if (exact) return { matched: exact };
+    if (!rows.length || wanted.includes('/')) return { empty: true, candidates: [] };
+    if (rows.length === 1) return { matched: rows[0] };
+    return { empty: true, candidates: rows.map(r => r.path).sort() };
+}
+
+async function queryCallerRows(graph, callerIds, nodeReturn) {
+    if (!callerIds.length) return [];
+    return graph.query(`MATCH (n:Entity) WHERE n.id IN $callerIds RETURN ${nodeReturn}`, { callerIds });
+}
+
+function assembleFunctionViewGraph(defNodes, barrelNodes, callerRows, docRows, edgeRows) {
+    const allNodes = new Map();
+    for (const n of [...defNodes, ...barrelNodes, ...callerRows.map(rowToNode), ...docRows.map(rowToNode)]) {
+        allNodes.set(n.id, n);
+    }
+    const ids = new Set(allNodes.keys());
+    return {
+        nodes: Array.from(allNodes.values()),
+        edges: edgeRows.filter(e => ids.has(e.from_id) && ids.has(e.to_id)).map(rowToEdge)
+    };
+}
+
 export function createDirectQueries(withGraph, location, nodeReturn) {
     return {
         async directDefinedIn(symbol) {
@@ -11,16 +53,7 @@ export function createDirectQueries(withGraph, location, nodeReturn) {
                     "MATCH (n:Entity) WHERE n.scope = 'project' AND n.type = 'CodeFile' AND (n.kind <> 'test' OR n.kind IS NULL) AND n.metadata_json CONTAINS $symbol RETURN n.path AS path, n.metadata_json AS metadata_json",
                     { symbol }
                 );
-                const locations = [];
-                for (const row of rows) {
-                    const meta = parseJson(row.metadata_json, {});
-                    const range = meta.symbolRanges?.[symbol];
-                    const isRange = Array.isArray(range);
-                    const isExported = Array.isArray(meta.exports) && meta.exports.includes(symbol);
-                    if (isRange || isExported) {
-                        locations.push(isRange ? { path: row.path, startLine: range[0], endLine: range[1] } : { path: row.path });
-                    }
-                }
+                const locations = rows.map(r => toDefinedLocation(r, symbol)).filter(Boolean);
                 return locations.sort((a, b) => a.path.localeCompare(b.path));
             });
         },
@@ -33,22 +66,9 @@ export function createDirectQueries(withGraph, location, nodeReturn) {
                     "MATCH (n:Entity) WHERE n.scope = 'project' AND n.type = 'CodeFile' AND (lower(n.path) = lower($wanted) OR (n.name IS NOT NULL AND lower(n.name) = lower($wanted))) RETURN n.path AS path, n.name AS name, n.metadata_json AS metadata_json",
                     { wanted }
                 );
-                if (!rows.length) return { file: wanted, found: false, candidates: [], names: [] };
-                const exact = rows.find(r => r.path === wanted) ?? rows.find(r => r.path.toLowerCase() === wanted.toLowerCase());
-                if (exact) {
-                    const meta = parseJson(exact.metadata_json, {});
-                    const names = [...new Set((meta.exports || []).filter(n => typeof n === 'string'))].sort();
-                    return { file: exact.path, found: true, candidates: [], names };
-                }
-                if (!wanted.includes('/')) {
-                    if (rows.length === 1) {
-                        const meta = parseJson(rows[0].metadata_json, {});
-                        const names = [...new Set((meta.exports || []).filter(n => typeof n === 'string'))].sort();
-                        return { file: rows[0].path, found: true, candidates: [], names };
-                    }
-                    return { file: wanted, found: false, candidates: rows.map(r => r.path).sort(), names: [] };
-                }
-                return { file: wanted, found: false, candidates: [], names: [] };
+                const res = resolveMatchedRow(rows, wanted);
+                if (res.empty) return { file: wanted, found: false, candidates: res.candidates, names: [] };
+                return { file: res.matched.path, found: true, candidates: [], names: extractExportNames(res.matched) };
             });
         },
 
@@ -75,19 +95,13 @@ export function createDirectQueries(withGraph, location, nodeReturn) {
                     "MATCH (a:Entity) WHERE a.scope = 'project' AND a.type = 'CodeFile' AND (lower(a.path) = lower($wanted) OR (a.name IS NOT NULL AND lower(a.name) = lower($wanted))) RETURN a.id AS id, a.path AS path",
                     { wanted }
                 );
-                if (!rows.length) return { file: wanted, found: false, candidates: [], files: [] };
-                const exact = rows.find(r => r.path === wanted) ?? rows.find(r => r.path.toLowerCase() === wanted.toLowerCase());
-                let matched = exact;
-                if (!matched && !wanted.includes('/')) {
-                    if (rows.length === 1) matched = rows[0];
-                    else return { file: wanted, found: false, candidates: rows.map(r => r.path).sort(), files: [] };
-                }
-                if (!matched) return { file: wanted, found: false, candidates: [], files: [] };
+                const res = resolveMatchedRow(rows, wanted);
+                if (res.empty) return { file: wanted, found: false, candidates: res.candidates, files: [] };
                 const edges = await graph.query(
                     "MATCH (a:Entity)-[e:RELATES]->(b:Entity) WHERE a.id = $id AND e.relation = 'IMPORTS' AND b.type = 'CodeFile' AND b.path <> a.path RETURN DISTINCT b.path AS path",
-                    { id: matched.id }
+                    { id: res.matched.id }
                 );
-                return { file: matched.path, found: true, candidates: [], files: edges.map(e => e.path).sort() };
+                return { file: res.matched.path, found: true, candidates: [], files: edges.map(e => e.path).sort() };
             });
         },
 
@@ -99,19 +113,13 @@ export function createDirectQueries(withGraph, location, nodeReturn) {
                     "MATCH (a:Entity) WHERE a.scope = 'project' AND a.type = 'CodeFile' AND (lower(a.path) = lower($wanted) OR (a.name IS NOT NULL AND lower(a.name) = lower($wanted))) RETURN a.id AS id, a.path AS path",
                     { wanted }
                 );
-                if (!rows.length) return { file: wanted, found: false, candidates: [], files: [] };
-                const exact = rows.find(r => r.path === wanted) ?? rows.find(r => r.path.toLowerCase() === wanted.toLowerCase());
-                let matched = exact;
-                if (!matched && !wanted.includes('/')) {
-                    if (rows.length === 1) matched = rows[0];
-                    else return { file: wanted, found: false, candidates: rows.map(r => r.path).sort(), files: [] };
-                }
-                if (!matched) return { file: wanted, found: false, candidates: [], files: [] };
+                const res = resolveMatchedRow(rows, wanted);
+                if (res.empty) return { file: wanted, found: false, candidates: res.candidates, files: [] };
                 const edges = await graph.query(
                     "MATCH (b:Entity)-[e:RELATES]->(a:Entity) WHERE a.id = $id AND e.relation = 'IMPORTS' AND b.type = 'CodeFile' AND b.path <> a.path RETURN DISTINCT b.path AS path",
-                    { id: matched.id }
+                    { id: res.matched.id }
                 );
-                return { file: matched.path, found: true, candidates: [], files: edges.map(e => e.path).sort() };
+                return { file: res.matched.path, found: true, candidates: [], files: edges.map(e => e.path).sort() };
             });
         },
 
@@ -139,25 +147,14 @@ export function createDirectQueries(withGraph, location, nodeReturn) {
                     { targetIds }
                 );
                 const callerIds = [...new Set(edgeRows.map(e => e.from_id))];
-                const callerRows = callerIds.length ? await graph.query(
-                    `MATCH (n:Entity) WHERE n.id IN $callerIds RETURN ${nodeReturn}`,
-                    { callerIds }
-                ) : [];
+                const callerRows = await queryCallerRows(graph, callerIds, nodeReturn);
 
                 const docRows = await graph.query(
                     `MATCH (n:Entity) WHERE n.scope = 'project' AND n.type = 'Document' AND (n.metadata_json CONTAINS $symbol OR n.documentation CONTAINS $symbol) RETURN ${nodeReturn}`,
                     { symbol }
                 );
 
-                const allNodes = new Map();
-                for (const n of [...defNodes, ...barrelNodes, ...callerRows.map(rowToNode), ...docRows.map(rowToNode)]) {
-                    allNodes.set(n.id, n);
-                }
-                const ids = new Set(allNodes.keys());
-                return {
-                    nodes: Array.from(allNodes.values()),
-                    edges: edgeRows.filter(e => ids.has(e.from_id) && ids.has(e.to_id)).map(rowToEdge)
-                };
+                return assembleFunctionViewGraph(defNodes, barrelNodes, callerRows, docRows, edgeRows);
             });
         }
     };

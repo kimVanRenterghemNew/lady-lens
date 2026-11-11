@@ -43,6 +43,17 @@ describe('MCP config tools', () => {
         expect(result.matches[0].file).toBe('App.csproj');
     });
 
+    // MCP smoke test (2026-11-11): config_grep "vitest" on lady-lens gave 0 matches with truncated: true. grep cut at 50
+    // matches in test files first, and only then kept the config files, so package.json never made it.
+    it('finds a config match behind more than a page of code matches', () => {
+        fs.mkdirSync(path.join(root, 'src'));
+        for (let i = 0; i < 60; i++) fs.writeFileSync(path.join(root, 'src', `a${String(i).padStart(2, '0')}.js`), '// PackageReference\n');
+        const result = configGrep({ pattern: 'PackageReference' });
+        expect(result.matches.map(match => match.file)).toEqual(['App.csproj']);
+        expect(result.totalCount).toBe(1);
+        expect(result.truncated).toBe(false);
+    });
+
     it('updates config and refreshes graph facts', async () => {
         const before = fs.readFileSync(path.join(root, 'App.csproj'), 'utf8');
         const result = await configUpdate({ path: 'App.csproj', content: '<Project><PackageReference Include="Newtonsoft.Json" Version="13.0.3" /></Project>', expectedHash: await import('crypto').then(({ default: crypto }) => crypto.createHash('sha256').update(before).digest('hex')) });

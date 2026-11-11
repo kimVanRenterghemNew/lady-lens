@@ -11,10 +11,10 @@ import crypto from 'crypto';
 export const fakeSha = name => crypto.createHash('sha1').update(name).digest('hex');
 
 const NO_REPOSITORY = {
-    currentBranch: () => null, resolveCommit: () => null, mergeBase: () => null, readBlob: () => null, logRange: () => [], countRange: () => null,
+    currentBranch: () => null, resolveCommit: () => null, mergeBase: () => null, readBlob: () => null, readBlobBytes: () => null, logRange: () => [], commitList: () => [], countRange: () => null,
     headInfo: () => null, commitInfo: () => null, fileLog: () => [], commitFiles: () => [], listBranches: () => [], listTree: () => null,
     readBlobs: (ref, paths) => new Map(paths.map(file => [file, null])), existsAt: () => false, prefix: () => null, changedSince: () => null,
-    grepRef: () => [], lastCommitFor: () => null, conflicts: () => null, worktreeChanges: () => [], ignoredPaths: () => [],
+    grepRef: () => [], grepRefs: (ref, names) => new Map(names.map(name => [name, []])), lastCommitFor: () => null, conflicts: () => null, worktreeChanges: () => [], ignoredPaths: () => [],
     diffNameStatus: () => { throw new Error('not a git repository'); }
 };
 
@@ -95,7 +95,9 @@ export function createFakeGit(state = null) {
             return treeDiff(head, worktree);
         },
         readBlob: (ref, file) => treeOf(ref)?.get(file) ?? null,
+        readBlobBytes: (ref, file) => { const blob = treeOf(ref)?.get(file); return blob == null ? null : Buffer.from(blob); },
         logRange: (from, to, { max = 50 } = {}) => (range(from, to) || []).slice(0, max).map(short),
+        commitList: (from, to, { max = 200 } = {}) => (range(from, to) || []).slice(0, max).map(info),
         countRange: (from, to) => range(from, to)?.length ?? null,
         headInfo: () => { const head = commits.get(headSha); return head ? { sha: head.sha, date: head.date, message: head.subject } : null; },
         commitInfo: ref => info(commits.get(resolve(ref))),
@@ -117,6 +119,7 @@ export function createFakeGit(state = null) {
             for (const file of tree ? [...tree.keys()].sort() : []) tree.get(file).split(/\r?\n/).forEach((text, index) => { if (word.test(text)) found.push({ file, line: index + 1, text: text.trim() }); });
             return found.slice(0, max);
         },
+        grepRefs: (ref, names, options) => new Map(names.map(name => [name, git.grepRef(ref, name, options)])),
         lastCommitFor: (from, to, file) => { const list = range(from, to); return list ? (touching(list, file).map(short)[0] ?? null) : null; },
         conflicts: (a, b) => {
             const base = treeOf(git.mergeBase(a, b));

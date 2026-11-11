@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { parse } from 'acorn';
-import { normalizeNodeId } from '../../index.js';
-import { analyzeSource, fileKindOf, configFilesNamed, isLanguageSupported, analyzeSourceForLanguage } from '../../index.js';
+import { normalizeNodeId } from '../../model/index.js';
+import { analyzeSource, fileKindOf, configFilesNamed, analyzeSourceForLanguage } from '../../sync/index.js';
 
 function normalizeAstValue(value) {
     if (Array.isArray(value)) return value.map(normalizeAstValue);
@@ -40,6 +40,26 @@ export function fileNodeId(relativePath) {
     return normalizeNodeId(`file:${String(relativePath).replace(/\\/g, '/')}`);
 }
 
+export const MAX_AST_SOURCE = 512 * 1024;
+
+function codeEntityMetadata(source, facts) {
+    const meta = {
+        lines: source.split(/\r?\n/).length,
+        exports: facts.exports,
+        symbols: facts.symbols,
+        symbolRanges: facts.symbolRanges,
+        keywords: facts.keywords,
+        imports: facts.imports,
+        calls: facts.calls,
+        functions: facts.functions,
+        fileSmells: facts.fileSmells || [],
+        reads: configFilesNamed(source)
+    };
+    if (facts.callbacks) meta.callbacks = facts.callbacks;
+    if (facts.parseError) meta.parseError = facts.parseError;
+    return meta;
+}
+
 /**
  * Pure: the project entity for one JavaScript source. Facts (exports, symbols,
  * slash commands, imports, purpose) go into metadata so `graph_query` can rank on them; the
@@ -47,11 +67,7 @@ export function fileNodeId(relativePath) {
  */
 export function buildCodeEntity(relativePath, source, { now = new Date().toISOString(), includeAst = false, scriptPaths } = {}) {
     const isJs = /\.[cm]?js$/i.test(relativePath);
-    const facts = isJs
-        ? analyzeSource(source)
-        : isLanguageSupported(relativePath)
-            ? analyzeSourceForLanguage(source, relativePath)
-            : analyzeSourceForLanguage(source, relativePath);
+    const facts = isJs ? analyzeSource(source, relativePath) : analyzeSourceForLanguage(source, relativePath);
     const kind = facts.isTest ? 'test' : fileKindOf(relativePath, scriptPaths ? { scriptPaths } : {});
     return {
         id: fileNodeId(relativePath),
@@ -62,8 +78,9 @@ export function buildCodeEntity(relativePath, source, { now = new Date().toISOSt
         name: relativePath.split('/').pop(),
         contentHash: crypto.createHash('sha256').update(source).digest('hex'),
         documentation: facts.purpose,
-        metadata: { lines: source.split(/\r?\n/).length, exports: facts.exports, symbols: facts.symbols, symbolRanges: facts.symbolRanges, keywords: facts.keywords || [], imports: facts.imports, calls: facts.calls, functions: facts.functions || [], reads: configFilesNamed(source), ...(facts.parseError ? { parseError: facts.parseError } : {}) },
-        ...(includeAst && isJs ? { ast: parseJavaScriptAst(source) } : {}),
+        metadata: codeEntityMetadata(source, facts),
+        // a tree is ~9x its source: none for a bundle over MAX_AST_SOURCE, so one vendored file cannot fill memory or the buffer
+        ...(includeAst && isJs && source.length <= MAX_AST_SOURCE ? { ast: parseJavaScriptAst(source) } : {}),
         createdAt: now,
         updatedAt: now,
         observedAt: now

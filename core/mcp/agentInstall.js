@@ -29,6 +29,8 @@ export function agentTargets({ home = os.homedir(), platform = process.platform,
         target('windsurf', 'Windsurf', path.join(home, '.codeium', 'windsurf'), path.join(home, '.codeium', 'windsurf', 'mcp_config.json')),
         target('gemini-cli', 'Gemini CLI', path.join(home, '.gemini', 'settings.json'), path.join(home, '.gemini', 'settings.json')),
         target('antigravity', 'Antigravity', path.join(home, '.gemini', 'antigravity'), path.join(home, '.gemini', 'antigravity', 'mcp_config.json')),
+        // the Antigravity CLI reads ~/.gemini/config/mcp_config.json, stdio or Streamable HTTP only (an /sse url fails there)
+        target('antigravity-cli', 'Antigravity CLI', path.join(home, '.gemini', 'antigravity-cli'), path.join(home, '.gemini', 'config', 'mcp_config.json')),
         target('vscode', 'VS Code', appSupport('Code', 'User'), appSupport('Code', 'User', 'mcp.json'), { key: 'servers', typed: true }),
         target('codex', 'Codex', path.join(home, '.codex'), path.join(home, '.codex', 'config.toml'), { toml: 'codex' }),
         target('vibe', 'Mistral Vibe', path.join(home, '.vibe'), path.join(home, '.vibe', 'config.toml'), { toml: 'vibe' })
@@ -127,16 +129,45 @@ export function runAgentInstall({ action = 'install', ids = [], lensPath, repo =
     return [...unknown.map(id => ({ id, label: id, file: '', status: 'error', reason: `unknown agent; try: ${all.map(target => target.id).join(', ')}` })), ...results];
 }
 
-export function runSkillInstall({ action = 'install', ids = [], lensPath, dryRun = false, env = {}, name = SERVER_NAME }) {
+// `lens install skill vscode claude-code` names agents: the skill folder and the policy file each agent reads
+const SKILL_OF_AGENT = { 'claude-code': 'claude', 'claude-desktop': 'claude', vscode: 'copilot' };
+const POLICY_OF_AGENT = { 'claude-code': 'claude', 'claude-desktop': 'claude' };
+
+export function runSkillInstall({ action = 'install', ids: named = [], lensPath, dryRun = false, env = {}, name = SERVER_NAME, policyIds = null }) {
     const all = skillTargets(env, name);
-    const explicit = ids.length > 0 && !ids.includes('all');
+    const known = new Set([...all, ...policyTargets(env), ...agentTargets(env)].map(target => target.id));
+    const unknown = named.filter(id => id !== 'all' && !known.has(id));
+    const explicit = named.length > 0 && !named.includes('all');
+    const ids = named.filter(id => known.has(id)).flatMap(id => [SKILL_OF_AGENT[id] ?? (all.some(target => target.id === id) ? id : 'agents'), POLICY_OF_AGENT[id] ?? id]);
+    const errors = unknown.map(id => ({ id, label: id, file: '', status: 'error', reason: `unknown agent; try: ${agentTargets(env).map(target => target.id).join(', ')}` }));
+    if (explicit && unknown.length === named.length) return errors;
     const wanted = explicit ? all.filter(target => ids.includes(target.id)) : all.filter(target => fs.existsSync(target.marker));
     const skills = wanted.map(target => ({ id: target.id, label: target.label, file: target.file, ...(action === 'uninstall' ? uninstallSkill(target, dryRun) : installSkill(target, lensPath, dryRun, name)) }));
-    if (name !== SERVER_NAME) return skills; // the lady-lens-first policy belongs to the main skill only
+    if (name !== SERVER_NAME) return [...errors, ...skills]; // the lady-lens-first policy belongs to the main skill only
     // the skill loads only when a task matches it; the policy in the always-read instruction files makes lady-lens the default
-    const policies = policyTargets(env).filter(target => (explicit ? ids.includes(target.id) : fs.existsSync(target.marker)));
+    const policies = policyTargets(env).filter(target => (policyIds ? policyIds.includes(target.id) : explicit ? ids.includes(target.id) : fs.existsSync(target.marker)));
     const policy = action === 'uninstall' ? null : fs.readFileSync(path.join(path.dirname(skillSource(lensPath)), 'lens-instructions.md'), 'utf8');
-    return [...skills, ...policies.map(target => ({ id: target.id, label: target.label, file: target.file, ...(policy === null ? uninstallPolicy(target, dryRun) : installPolicy(target, policy, dryRun)) }))];
+    return [...errors, ...skills, ...policies.map(target => ({ id: target.id, label: target.label, file: target.file, ...(policy === null ? uninstallPolicy(target, dryRun) : installPolicy(target, policy, dryRun)) }))];
+}
+
+const mentionsLens = file => { try { return fs.readFileSync(file, 'utf8').includes(SERVER_NAME); } catch { return false; } };
+
+/**
+ * After `lens update`: register lady-lens again only where it is registered (new version; a `--repo` in a JSON entry is kept),
+ * and copy again only the skills that are installed, so every agent picks up the new package and nothing new is added.
+ */
+export function runRefresh({ lensPath, env = {}, dryRun = false }) {
+    const agents = agentTargets(env).filter(target => mentionsLens(target.file)).flatMap(target => {
+        let repo = null;
+        try { const args = readConfig(target.file)[target.key]?.[SERVER_NAME]?.args || []; repo = args.includes('--repo') ? args[args.indexOf('--repo') + 1] : null; } catch { /* toml */ }
+        return runAgentInstall({ ids: [target.id], lensPath, repo, env, dryRun });
+    });
+    const skills = [SERVER_NAME, MENDIX_SKILL].flatMap(name => {
+        const ids = skillTargets(env, name).filter(target => fs.existsSync(target.file)).map(target => target.id);
+        // a refresh updates the policies that are there; it never adds one
+        return ids.length ? runSkillInstall({ ids, lensPath, env, name, dryRun, policyIds: policyTargets(env).filter(target => mentionsLens(target.file)).map(target => target.id) }) : [];
+    });
+    return [...agents, ...skills];
 }
 
 /** The text and exit code of `lens install` / `lens uninstall`. */
@@ -149,8 +180,13 @@ export function formatAgentInstall(results, { action = 'install', dryRun = false
     return { ok: !results.some(r => r.status === 'error'), text: lines.join('\n') };
 }
 
-export function agentInstallCommand({ action, ids, lensPath, repo, dryRun, skill = false, mendix = false }) {
-    const results = mendix ? runSkillInstall({ action, ids, lensPath, dryRun, name: MENDIX_SKILL })
-        : skill ? runSkillInstall({ action, ids, lensPath, dryRun }) : runAgentInstall({ action, ids, lensPath, repo, dryRun });
+export function agentInstallCommand({ action, ids, lensPath, repo, dryRun, skill = false, mendix = false, refresh = false, env = {} }) {
+    // `lens install skill` / `skill-mendix` read like the flags `--skill` / `--mendix`
+    mendix ||= ids.some(id => id === 'mendix' || id === 'skill-mendix');
+    skill ||= ids.includes('skill');
+    ids = ids.filter(id => !['skill', 'mendix', 'skill-mendix'].includes(id));
+    if (refresh && action === 'install') return formatAgentInstall(runRefresh({ lensPath, env, dryRun }), { action, dryRun });
+    const results = mendix ? runSkillInstall({ action, ids, lensPath, dryRun, env, name: MENDIX_SKILL })
+        : skill ? runSkillInstall({ action, ids, lensPath, dryRun, env }) : runAgentInstall({ action, ids, lensPath, repo, dryRun, env });
     return formatAgentInstall(results, { action, dryRun });
 }

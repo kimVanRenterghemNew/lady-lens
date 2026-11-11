@@ -20,6 +20,40 @@ export function toMillis(value) {
     return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+function assignTimestamps(node, row) {
+    const createdAt = toMillis(row.created_at);
+    const updatedAt = toMillis(row.updated_at);
+    if (createdAt !== undefined) node.createdAt = createdAt;
+    if (updatedAt !== undefined) node.updatedAt = updatedAt;
+}
+
+const ROW_PROP_MAP = [
+    ['kind', 'kind'],
+    ['path', 'path'],
+    ['name', 'name'],
+    ['documentation', 'purpose']
+];
+
+function assignRowFields(node, row) {
+    for (const [sourceKey, targetKey] of ROW_PROP_MAP) {
+        if (row[sourceKey]) node[targetKey] = row[sourceKey];
+    }
+    if (row.type === 'Document' && row.name) node.title = row.name;
+}
+
+function asArray(val) {
+    return Array.isArray(val) ? val : [];
+}
+
+function extractMetadataLists(metadata) {
+    return {
+        symbolRanges: metadata.symbolRanges || {},
+        exports: asArray(metadata.exports),
+        functions: asArray(metadata.functions),
+        fileSmells: asArray(metadata.fileSmells)
+    };
+}
+
 /** Ladybug row -> node DTO in the shape graphModel/graph_query expect. */
 export function rowToNode(row) {
     const metadata = parseJson(row.metadata_json, {});
@@ -27,28 +61,42 @@ export function rowToNode(row) {
     const node = {
         id: row.id,
         type: row.type,
-        ...(row.kind ? { kind: row.kind } : {}),
         scope: row.scope || PROJECT_SCOPE,
-        ...(row.path ? { path: row.path } : {}),
-        ...(row.name ? { name: row.name } : {}),
-        ...(row.documentation ? { purpose: row.documentation } : {}),
-        ...Object.fromEntries(Object.entries(visible).filter(([key]) => !DTO_RESERVED.has(key)))
+        ...extractMetadataLists(metadata),
+        metadata
     };
+    Object.assign(node, Object.fromEntries(Object.entries(visible).filter(([key]) => !DTO_RESERVED.has(key))));
     if (Array.isArray(metadata.calls)) node.calls = metadata.calls;
-    if (row.type === 'Document' && row.name) node.title = row.name;
-    const createdAt = toMillis(row.created_at);
-    const updatedAt = toMillis(row.updated_at);
-    if (createdAt !== undefined) node.createdAt = createdAt;
-    if (updatedAt !== undefined) node.updatedAt = updatedAt;
+    assignRowFields(node, row);
+    assignTimestamps(node, row);
     return node;
+}
+
+const asString = (val) => (val || '');
+
+function storedStrings(row) {
+    return {
+        kind: asString(row.kind),
+        path: asString(row.path),
+        name: asString(row.name),
+        documentation: asString(row.documentation)
+    };
 }
 
 /** Stored row -> raw node (loadNodes: documentation and full metadata). */
 export function rowToStoredNode(row) {
+    const strings = storedStrings(row);
     return {
-        id: row.id, type: row.type, kind: row.kind || '', scope: row.scope || PROJECT_SCOPE, path: row.path || '', name: row.name || '',
-        documentation: row.documentation || '', metadata: parseJson(row.metadata_json, {}),
-        createdAt: row.created_at || undefined, updatedAt: row.updated_at || undefined
+        id: row.id,
+        type: row.type,
+        kind: strings.kind,
+        scope: row.scope || PROJECT_SCOPE,
+        path: strings.path,
+        name: strings.name,
+        documentation: strings.documentation,
+        metadata: parseJson(row.metadata_json, {}),
+        createdAt: row.created_at || undefined,
+        updatedAt: row.updated_at || undefined
     };
 }
 

@@ -19,6 +19,9 @@ import { diffImpact } from './diffImpact.js';
 import { healthTool, getRepoChurn, invalidateChurnCache } from './codeHealth.js';
 import { packageFolderView, readPackageFile } from './packageFolderView.js';
 import { searchView } from './searchView.js';
+import { parseStackTrace, locateFrames, traceView } from './stackTrace.js';
+import { callFlow, toMermaid } from './callFlow.js';
+import { codeHistory } from './codeHistory.js';
 import { fitToBudget, withBudget } from './budget.js';
 import { resolveCodebaseQuery } from './queryFlow.js';
 import { RESEARCH_TOOL_SCHEMAS } from './schemas.js';
@@ -76,6 +79,12 @@ export {
     packageFolderView,
     readPackageFile,
     searchView,
+    parseStackTrace,
+    locateFrames,
+    traceView,
+    callFlow,
+    toMermaid,
+    codeHistory,
     fitToBudget,
     withBudget,
     resolveCodebaseQuery,
@@ -108,9 +117,12 @@ export const RESEARCH_TOOLS = {
     exists: withBudget(args => fileExists(args), { lists: ['similar'], narrow: 'ask about one file' }),
     definedIn: withBudget(args => definedInTool(args), { lists: ['locations'], narrow: 'ask about one symbol' }),
     functionView: withBudget(args => functionViewTool(args), { lists: ['tests', 'callers', 'stories'], narrow: 'ask about one symbol' }),
-    diff_impact: withBudget(args => diffImpact(args), { lists: ['testGaps', 'functions'], narrow: 'lower limit, or diff a smaller range' }),
+    diff_impact: withBudget(args => diffImpact(args), { lists: ['functions', 'testGaps', 'files'], narrow: 'lower limit, or diff a smaller range' }),
     folderView: withBudget(args => folderViewTool(args), { lists: ['parts', 'flow'], texts: ['text'], narrow: 'ask about a smaller folder' }),
-    health: withBudget(args => healthTool(args), { lists: ['hotspots', 'cycles', 'modules', 'files'], narrow: 'ask about one module or file, or lower limit' }),
+    health: withBudget(args => healthTool(args), { lists: ['cycles', 'hotspots', 'modules', 'zoneOfPain', 'complexFunctions', 'designSmells', 'files'], narrow: 'ask about one module or file, or lower limit' }),
     searchView: withBudget(args => searchView(args), { lists: ['files'], narrow: 'use a more specific query or include filter' }),
     graph_query: withBudget(graph_query, { lists: ['nodes', 'symbols', 'edges'], texts: ['context'], narrow: 'query one node, or lower limit' })
 };
+
+// The dashboard shows the whole health report: the context budget is for an assistant, not for a page.
+export const DASHBOARD_TOOLS = { ...RESEARCH_TOOLS, health: args => healthTool(args) };

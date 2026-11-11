@@ -125,4 +125,27 @@ describe('folderView', () => {
         expect(text).toContain('no tests in this graph');
         expect(text).not.toMatch(/untested|reached by 0/);
     });
+
+    it('renders issues in notClean and handles edge cases of renderFolderView', () => {
+        expect(renderFolderView(null)).toBe('');
+        const mockView = {
+            found: true,
+            folder: 'core/bad',
+            files: 3,
+            entry: { path: 'core/bad/index.js', purpose: '', exportCount: 0, exports: [] },
+            parts: [{ part: 'p1', files: 1, roles: [], exports: ['exp1'], exportCount: 3 }],
+            flow: [{ from: 'p1', to: 'p2', imports: 2, calls: 1 }],
+            usedBy: { files: 0, tests: 1, folders: [], callers: [{ path: 'core/call.js', calls: 1, purpose: '', pointedBy: [] }] },
+            notClean: {
+                untested: ['core/bad/a.js', 'core/bad/b.js', 'core/bad/c.js', 'core/bad/d.js', 'core/bad/e.js', 'core/bad/f.js'],
+                inCycles: ['core/bad/a.js'],
+                boundary: ['core/bad/b.js']
+            }
+        };
+        const rendered = renderFolderView(mockView);
+        expect(rendered).toContain('untested: core/bad/a.js');
+        expect(rendered).toContain('in import cycles: core/bad/a.js');
+        expect(rendered).toContain('imports past a module\'s index.js: core/bad/b.js');
+        expect(rendered).toContain('Nothing outside core/bad/ uses it at runtime (only tests)');
+    });
 });

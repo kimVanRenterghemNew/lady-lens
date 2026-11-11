@@ -10,28 +10,28 @@
  */
 import { cyclesOf, shortestLoop } from './importCycles.js';
 import { calculateArchitectureMetrics } from './architectureMetrics.js';
+import {
+    buildHealthSummary,
+    normalizeHealthOptions,
+    assembleHealthEntry,
+    topHotspots,
+    filterHealthFiles,
+    rollupModules
+} from './healthIssues.js';
+
+export {
+    ISSUE_RULES,
+    evaluateIssues,
+    buildHealthSummary,
+    coverageFromSummary,
+    topHotspots,
+    filterHealthFiles,
+    rollupModules
+} from './healthIssues.js';
 
 const isTest = (node) => node.kind === 'test' || node.type === 'Test';
 const isBarrel = (path) => /(^|\/)index\.[cm]?js$/.test(path);
 const dirOf = (path) => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-const LARGE_LINES = 400;
-const HIGH_FAN_IN = 40;
-const HIGH_FAN_OUT = 20;
-const LOW_COVERAGE = 50;
-
-/**
- * Pure: an istanbul `coverage-summary.json` (keys are absolute paths, plus `total`) -> repo-relative path -> % lines covered.
- * @param {Object} summary - the parsed file
- * @param {(absolute: string) => string|null} toRepoPath - null for a path outside the repository
- */
-export function coverageFromSummary(summary, toRepoPath) {
-    const coverage = new Map();
-    for (const [key, value] of Object.entries(summary || {})) {
-        const path = key === 'total' ? null : toRepoPath(key);
-        if (path && Number.isFinite(value?.lines?.pct)) coverage.set(path, value.lines.pct);
-    }
-    return coverage;
-}
 
 // What a host knows from running code that the graph cannot read from files: how often work on a file failed live
 // (e.g. an edit refused by a static check, a failed verification). `({ root }) => Map<path, { <failure name>: count }>`.
@@ -55,123 +55,134 @@ function wordIn(text, name) {
     return new RegExp(`(^|[^\\w$])${name.replace(/[$]/g, '\\$')}(?![\\w$])`).test(text);
 }
 
-/**
- * @param {Object} graph - graph model (nodes Map, edges array)
- * @param {{readFile?: (path: string) => string|null, churn?: Map<string, number>, coverage?: Map<string, number>, signals?: Map<string, Object>, file?: string, module?: string, only?: string[]}} options
- *   coverage: repo-relative path -> % of lines covered (see coverageFromSummary)
- *   signals: repo-relative path -> { <failure name>: count } from the host's live runs (see configureLensHealthSignals)
- *   only: compute the entries of these files only (no shortest cycle loops); the module rollup then covers just them
- */
-export function codeHealth(graph, { readFile = () => null, churn = new Map(), coverage = new Map(), signals = new Map(), file, module, only } = {}) {
+function recordTestPath(path, testPath, out, reachedBy, queue) {
+    const list = reachedBy.get(path) || [];
+    if (!reachedBy.has(path)) reachedBy.set(path, list);
+    list.push(testPath);
+    if (isBarrel(path)) queue.push(...(out.get(path) || []));
+}
+
+function traceTestReach(testPath, out, reachedBy) {
+    const seen = new Set();
+    const queue = [...(out.get(testPath) || [])];
+    while (queue.length) {
+        const path = queue.shift();
+        if (!seen.has(path)) {
+            seen.add(path);
+            recordTestPath(path, testPath, out, reachedBy, queue);
+        }
+    }
+}
+
+function isHealthEdge(type) {
+    return type === 'IMPORTS' || type === 'TESTS';
+}
+
+function recordHealthEdge(edge, byId, out, inn) {
+    if (!isHealthEdge(edge.type)) return;
+    const from = byId.get(edge.from), to = byId.get(edge.to);
+    if (!from || !to || from === to) return;
+    out.get(from.path).add(to.path);
+    inn.get(to.path).add(from.path);
+}
+
+function findUntestedExports(exports, readable, covered, barrel, textOf) {
+    if (!readable.length) return [];
+    if (covered !== undefined) return [];
+    if (barrel) return [];
+    return exports.filter(name => !readable.some(test => wordIn(textOf(test), name)));
+}
+
+function findBoundaryViolations(path, out, barrels) {
+    return [...out.get(path)].filter(to => !isBarrel(to) && [...barrels].some(dir => dir && to.startsWith(`${dir}/`) && !path.startsWith(`${dir}/`))).sort();
+}
+
+function nodeLines(node) {
+    return Number(node.lines) || 0;
+}
+
+function nodeExports(node) {
+    if (Array.isArray(node.exports)) return node.exports;
+    return [];
+}
+
+function buildFileEntry(node, helpers, textOf) {
+    const { path, kind } = node;
+    const barrel = isBarrel(path);
+    const tests = [...new Set(helpers.reachedBy.get(path) || [])].sort();
+    const exports = nodeExports(node);
+    const readable = tests.filter(test => textOf(test));
+    const covered = helpers.coverage.get(path);
+    const untestedExports = findUntestedExports(exports, readable, covered, barrel, textOf);
+    const boundaryViolations = findBoundaryViolations(path, helpers.out, helpers.barrels);
+    const lines = nodeLines(node);
+    const commits = helpers.churn.get(path) || 0;
+    const isTested = tests.length > 0 || covered > 0;
+
+    const meta = { path, kind, lines, exports: exports.length, inCycle: helpers.inCycle.has(path) };
+    const metrics = {
+        fanIn: helpers.inn.get(path).size, fanOut: helpers.out.get(path).size,
+        tested: isTested, tests, untestedExports, boundaryViolations,
+        churn: commits, hotspot: commits * lines
+    };
+    return assembleHealthEntry(meta, metrics, { covered, live: helpers.signals.get(path), barrel });
+}
+
+function collectDesignSmells(complexFunctions, files) {
+    const fnSmells = complexFunctions.flatMap(fn => (fn.smells || []).map(s => ({ ...s, file: fn.file, name: fn.name })));
+    const fileSmells = files.flatMap(entry => (entry.fileSmells || []).map(s => ({ ...s, file: entry.path })));
+    return [...fnSmells, ...fileSmells];
+}
+
+function createGraphAdjacency(graph) {
     const nodes = [...graph.nodes.values()].filter(node => node.type === 'CodeFile' && typeof node.path === 'string');
     const byId = new Map(nodes.map(node => [node.id, node]));
     const out = new Map(nodes.map(node => [node.path, new Set()]));
     const inn = new Map(nodes.map(node => [node.path, new Set()]));
-    for (const edge of graph.edges) {
-        if (edge.type !== 'IMPORTS' && edge.type !== 'TESTS') continue;
-        const from = byId.get(edge.from), to = byId.get(edge.to);
-        if (!from || !to || from === to) continue;
-        out.get(from.path).add(to.path);
-        inn.get(to.path).add(from.path);
-    }
+    graph.edges.forEach(edge => recordHealthEdge(edge, byId, out, inn));
+    return { nodes, byId, out, inn };
+}
+
+function resolveCycles(sources, sourceOut, wanted) {
+    const components = cyclesOf(sources.map(node => node.path).sort(), sourceOut);
+    const inCycle = new Set(components.flat());
+    const cycles = wanted ? [] : components.map(members => ({ size: members.length, shortest: shortestLoop(members, sourceOut) })).sort((a, b) => b.size - a.size);
+    return { inCycle, cycles };
+}
+
+/** Pure code health metrics from the graph, test reach, git churn and live health signals. */
+export function codeHealth(graph, options) {
+    const opts = normalizeHealthOptions(options);
+    const { nodes, byId, out, inn } = createGraphAdjacency(graph);
     const barrels = new Set(nodes.filter(node => isBarrel(node.path)).map(node => dirOf(node.path)));
 
-    // test reach: from every test, its imports, and on through barrels
     const reachedBy = new Map();
-    for (const test of nodes.filter(isTest)) {
-        const seen = new Set();
-        const queue = [...out.get(test.path)];
-        while (queue.length) {
-            const path = queue.shift();
-            if (seen.has(path)) continue;
-            seen.add(path);
-            if (!reachedBy.has(path)) reachedBy.set(path, []);
-            reachedBy.get(path).push(test.path);
-            if (isBarrel(path)) queue.push(...out.get(path));
-        }
-    }
+    nodes.filter(isTest).forEach(test => traceTestReach(test.path, out, reachedBy));
 
     const sources = nodes.filter(node => !isTest(node));
     const sourceOut = new Map(sources.map(node => [node.path, [...out.get(node.path)].filter(to => !isTest(byId.get(`file:${to}`) || {}))]));
-    const components = cyclesOf(sources.map(node => node.path).sort(), sourceOut);
-    const inCycle = new Set(components.flat());
-    // `only`: the entries of just these files (a graph_query answer needs ~10, not every file and every test text)
-    const wanted = Array.isArray(only) ? new Set(only) : null;
-    const cycles = wanted ? [] : components.map(members => ({ size: members.length, shortest: shortestLoop(members, sourceOut) })).sort((a, b) => b.size - a.size);
+    const wanted = Array.isArray(opts.only) ? new Set(opts.only) : null;
+    const { inCycle, cycles } = resolveCycles(sources, sourceOut, wanted);
+
     const testTexts = new Map();
-    const textOf = (path) => { if (!testTexts.has(path)) testTexts.set(path, readFile(path) ?? ''); return testTexts.get(path); };
-
-    let files = (wanted ? sources.filter(node => wanted.has(node.path)) : sources).map(node => {
-        const path = node.path;
-        const tests = [...new Set(reachedBy.get(path) || [])].sort();
-        const exports = Array.isArray(node.exports) ? node.exports : [];
-        const readable = tests.filter(test => textOf(test));
-        const untestedExports = readable.length ? exports.filter(name => !readable.some(test => wordIn(textOf(test), name))) : [];
-        // an import into dir/x.js of a module dir (it has an index.js) from outside dir
-        const boundaryViolations = [...out.get(path)].filter(to => !isBarrel(to) && [...barrels].some(dir => dir && to.startsWith(`${dir}/`) && !path.startsWith(`${dir}/`))).sort();
-        const lines = Number(node.lines) || 0;
-        const commits = churn.get(path) || 0;
-        const covered = coverage.get(path);
-        const live = signals.get(path);
-        const entry = {
-            path, kind: node.kind, lines, exports: exports.length, fanIn: inn.get(path).size, fanOut: out.get(path).size,
-            tested: tests.length > 0, tests, untestedExports, inCycle: inCycle.has(path), boundaryViolations, churn: commits, hotspot: commits * lines,
-            ...(covered === undefined ? {} : { coverage: covered }),
-            ...(live ? { live } : {})
-        };
-        entry.issues = [
-            // scripts and config are run or read, not imported by a test
-            !entry.tested && node.kind === 'source' && !isBarrel(path) && 'untested',
-            untestedExports.length && 'untested-exports',
-            covered !== undefined && covered < LOW_COVERAGE && 'low-coverage',
-            live && Object.values(live).some(count => count > 0) && 'live-failures',
-            entry.inCycle && 'cycle',
-            boundaryViolations.length && 'boundary',
-            lines > LARGE_LINES && 'large',
-            entry.fanIn >= HIGH_FAN_IN && 'high-fan-in',
-            entry.fanOut >= HIGH_FAN_OUT && 'high-fan-out'
-        ].filter(Boolean);
-        return entry;
-    });
-
-    const moduleOf = (path) => {
-        for (let dir = dirOf(path); dir; dir = dirOf(dir)) if (barrels.has(dir)) return dir;
-        return dirOf(path) || '.';
+    const textOf = (path) => {
+        if (!testTexts.has(path)) testTexts.set(path, opts.readFile(path) ?? '');
+        return testTexts.get(path);
     };
-    const modules = new Map();
-    for (const entry of files) {
-        const name = moduleOf(entry.path);
-        const rollup = modules.get(name) || { module: name, files: 0, lines: 0, untested: 0, cycles: 0, boundary: 0, churn: 0 };
-        rollup.files++; rollup.lines += entry.lines; rollup.churn += entry.churn;
-        if (entry.issues.includes('untested')) rollup.untested++;
-        if (entry.inCycle) rollup.cycles++;
-        if (entry.boundaryViolations.length) rollup.boundary++;
-        modules.set(name, rollup);
-    }
 
-    if (file) files = files.filter(entry => entry.path === file);
-    if (module) files = files.filter(entry => entry.path.startsWith(`${module.replace(/\/$/, '')}/`));
-    files.sort((a, b) => b.issues.length - a.issues.length || b.hotspot - a.hotspot || a.path.localeCompare(b.path));
-    const hotspots = files.filter(entry => entry.hotspot > 0).sort((a, b) => b.hotspot - a.hotspot).slice(0, 10)
-        .map(({ path, churn: commits, lines, hotspot }) => ({ path, churn: commits, lines, hotspot }));
+    const helpers = { reachedBy, coverage: opts.coverage, churn: opts.churn, signals: opts.signals, inCycle, out, inn, barrels };
+    const targets = wanted ? sources.filter(node => wanted.has(node.path)) : sources;
+    const allFiles = targets.map(node => buildFileEntry(node, helpers, textOf));
+    const modules = rollupModules(allFiles, barrels);
+    const files = filterHealthFiles(allFiles, opts.file, opts.module);
+    const hotspots = topHotspots(files);
+
     const { topCentralNodes, zoneOfPain, complexFunctions } = calculateArchitectureMetrics(graph, files);
-    const summary = {
-        files: files.length,
-        untested: files.filter(entry => entry.issues.includes('untested')).length,
-        inCycles: files.filter(entry => entry.inCycle).length,
-        boundary: files.filter(entry => entry.boundaryViolations.length).length,
-        large: files.filter(entry => entry.issues.includes('large')).length,
-        zoneOfPain: zoneOfPain.length,
-        complexFunctions: complexFunctions.length
-    };
+    const designSmells = collectDesignSmells(complexFunctions, files);
+    const summary = buildHealthSummary(files, zoneOfPain, complexFunctions, designSmells);
+
     return {
-        summary,
-        files,
-        modules: [...modules.values()].sort((a, b) => a.module.localeCompare(b.module)),
-        cycles,
-        hotspots,
-        topCentralNodes,
-        zoneOfPain,
-        complexFunctions
+        summary, files, modules, cycles, hotspots,
+        topCentralNodes, zoneOfPain, complexFunctions, designSmells
     };
 }

@@ -4,7 +4,7 @@
  */
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { RESEARCH_TOOLS, withBudget } from '../search/index.js';
-import { configGrep, configReferences, configUpdate, repoList, repoAdd, repoRemove, repoSync, branchDiff, branchImpact, commitShow, functionHistory, crossRepoSearch } from './handlers/index.js';
+import { configGrep, configReferences, configUpdate, repoList, repoAdd, repoRemove, repoSync, branchDiff, branchImpact, commitShow, functionHistory, crossRepoSearch, mendixDiff } from './handlers/index.js';
 
 const text = value => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
 
@@ -16,6 +16,7 @@ export const TOOL_ROUTES = [
     { name: 'repo_sync', handle: repoSync },
     { name: 'branch_diff', handle: branchDiff },
     { name: 'branch_impact', handle: branchImpact },
+    { name: 'mendix_diff', handle: mendixDiff },
     { name: 'cross_repo_search', handle: withBudget(args => crossRepoSearch(args), { lists: ['repos'], narrow: 'name fewer repos, or a more specific query' }) },
     { name: 'commit_show', handle: commitShow },
     { name: 'function_history', handle: functionHistory },

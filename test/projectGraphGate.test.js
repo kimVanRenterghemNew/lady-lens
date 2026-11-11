@@ -72,4 +72,12 @@ describe('project graph gate', () => {
         expect(log.mock.calls.map(call => call[0]).join('\n')).toContain('stale: 1 new, 0 changed, 1 removed');
         expect(sync.sync).toHaveBeenCalledWith({ mode: 'full' });
     });
+
+    it('an inherited name like toString or constructor is no /graph action: it prints the usage', async () => {
+        const log = vi.fn();
+        for (const action of ['toString', 'constructor']) {
+            expect(await runGraphCommand(action, { sync: {}, log })).toBeNull();
+        }
+        expect(log).toHaveBeenCalledWith('Usage: /graph [status|sync [--full]|reset]');
+    });
 });

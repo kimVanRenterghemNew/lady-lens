@@ -5,7 +5,7 @@
 import crypto from 'crypto';
 import path from 'path';
 import { fileNodeId } from './ladybugIndexer.js';
-import { normalizeNodeId } from '../../index.js';
+import { normalizeNodeId } from '../../model/index.js';
 
 const RUNS = /(?:^|[\s;&|])(?:node|bash|sh|pwsh|powershell)\s+(?:-\S+\s+)*([\w./-]+\.(?:m?js|cjs|sh|ps1))/g;
 
@@ -15,13 +15,11 @@ export function scriptsRun(command) {
 }
 
 function yamlFacts(source) {
-    const purpose = [];
-    for (const line of String(source).split(/\r?\n/)) {
-        if (/^\s*#/.test(line)) purpose.push(line.replace(/^\s*#\s?/, '').trim());
-        else if (line.trim()) break;
-    }
-    const keys = [...String(source).matchAll(/^([A-Za-z_][\w.-]*)\s*:/gm)].map(match => match[1]);
-    return { purpose: purpose.join(' ').slice(0, 240), keys, runs: [] };
+    const text = String(source);
+    const headerMatch = text.match(/^(?:\s*#.*(?:\r?\n|$))+/)?.[0] || '';
+    const purpose = headerMatch.split(/\r?\n/).map(line => line.replace(/^\s*#\s?/, '').trim()).filter(Boolean).join(' ').slice(0, 240);
+    const keys = [...text.matchAll(/^([A-Za-z_][\w.-]*)\s*:/gm)].map(match => match[1]);
+    return { purpose, keys, runs: [] };
 }
 
 function packageFacts(source) {
