@@ -7,6 +7,7 @@
 import { createGit } from '../git/index.js';
 import { isCodeFile, analyzeSource, analyzeSourceForLanguage } from '../graph/index.js';
 import { compareFiles } from './compare.js';
+import { readSources, blobsAt } from './readSources.js';
 
 const analyze = (source, file) => (/\.[cm]?jsx?$/i.test(file) ? analyzeSource(source) : analyzeSourceForLanguage(source, file));
 
@@ -20,12 +21,8 @@ function complexities(source, file) {
     }
 }
 
-function readEntries(files, { before, after }) {
-    return files.filter(file => isCodeFile(file.path) || isCodeFile(file.oldPath || file.path)).map(file => ({
-        file,
-        beforeSource: file.status === 'A' ? null : before(file.oldPath || file.path),
-        afterSource: file.status === 'D' ? null : after(file.path)
-    }));
+function readEntries(files, readers) {
+    return readSources(files.filter(file => isCodeFile(file.path) || isCodeFile(file.oldPath || file.path)), readers);
 }
 
 function withComplexity(entries, functions) {
@@ -42,24 +39,30 @@ function withComplexity(entries, functions) {
     });
 }
 
+function resolveRange(from, to, git) {
+    const unknown = [from, to].find(ref => !git.resolveCommit(ref));
+    if (unknown) return { error: `unknown branch or commit: ${unknown}` };
+    const base = git.mergeBase(from, to);
+    if (!base) return { error: `no common history between ${from} and ${to}` };
+    return {
+        source: { source: 'range', from, to, mergeBase: base.slice(0, 7) },
+        files: git.diffNameStatus(base, to),
+        readers: { before: blobsAt(git, base), after: blobsAt(git, to) }
+    };
+}
+
 /**
  * @param {{from?: string, to?: string, root?: string, git?: object, readFile?: (path: string) => string|null}} options
- *   `readFile` reads the working copy (repo-relative path); only used without `from`.
+ *   `readFile` reads the working copy (repo-relative path); only used without `from``.
  */
 export function changedFunctions({ from, to = 'HEAD', root = process.cwd(), git = createGit({ root }), readFile = () => null } = {}) {
-    let source, readers, files;
-    if (from) {
-        for (const ref of [from, to]) if (!git.resolveCommit(ref)) return { error: `unknown branch or commit: ${ref}` };
-        const base = git.mergeBase(from, to);
-        if (!base) return { error: `no common history between ${from} and ${to}` };
-        source = { source: 'range', from, to, mergeBase: base.slice(0, 7) };
-        files = git.diffNameStatus(base, to);
-        readers = { before: file => git.readBlob(base, file), after: file => git.readBlob(to, file) };
-    } else {
-        source = { source: 'worktree' };
-        files = git.worktreeChanges();
-        readers = { before: file => git.readBlob('HEAD', file), after: readFile };
-    }
+    const range = from ? resolveRange(from, to, git) : null;
+    if (range?.error) return range;
+    const { source, files, readers } = range ?? {
+        source: { source: 'worktree' },
+        files: git.worktreeChanges(),
+        readers: { before: blobsAt(git, 'HEAD'), after: paths => new Map(paths.map(file => [file, readFile(file)])) }
+    };
     const entries = readEntries(files, readers);
     return { ...source, files: files.map(file => file.path), functions: withComplexity(entries, compareFiles(entries).functions) };
 }

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { debug, configureLensLog } from '../core/observability/index.js';
+import { debug, debugStep, configureLensLog } from '../core/observability/index.js';
 import { configureLensEnv } from '../core/configuration/index.js';
 
 describe('debugLog', () => {
@@ -52,6 +52,16 @@ describe('debugLog', () => {
         expect(content).toContain('[INFO] string message');
         expect(content).toContain('[BENCH] lazy function message');
         expect(content).not.toContain('TRACE');
+    });
+
+    it('debugStep logs the time and summary of a step, and the stack and cause of a failed one before rethrowing', async () => {
+        const logs = [];
+        configureLensLog({ debug: (level, tag, msg) => logs.push(`${tag} ${typeof msg === 'function' ? msg() : msg}`) });
+        expect(await debugStep('sync', 'parse', async () => [1, 2], list => `${list.length} files`)).toEqual([1, 2]);
+        const error = Object.assign(new Error('buffer pool is full'), { cause: new Error('ladybug') });
+        await expect(debugStep('sync', 'write', () => { throw error; })).rejects.toBe(error);
+        expect(logs[1]).toMatch(/^sync parse: \d+ ms 2 files \(rss \d+ MB\)$/);
+        expect(logs[3]).toMatch(/^sync write: FAILED after \d+ ms .*\nError: buffer pool is full[\s\S]*\ncause: Error: ladybug/);
     });
 
     it('handles file write errors gracefully without throwing', () => {

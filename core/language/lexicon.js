@@ -73,7 +73,5 @@ export const NL_EN = new Proxy(Object.create(null), {
 
 /** `["wachtrij", "taken"]` -> the words plus their English translations, without duplicates, order kept. */
 export function withTranslations(words) {
-    const out = [];
-    for (const word of words) for (const term of [word, ...(NL_EN[word] || [])]) if (!out.includes(term)) out.push(term);
-    return out;
+    return [...new Set((words || []).flatMap(word => [word, ...(NL_EN[word] || [])]))];
 }

@@ -6,7 +6,8 @@
 import { execFileSync } from 'child_process';
 export { createFakeGit, fakeSha } from './fakeGit.js';
 
-const defaultRun = (root, args, { input, encoding = 'utf8' } = {}) => execFileSync('git', args, { cwd: root, encoding, input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024 });
+// windowsHide: in the detached daemon (no console) every git call without it opened a console and took ~1 s, not ~75 ms
+const defaultRun = (root, args, { input, encoding = 'utf8' } = {}) => execFileSync('git', args, { cwd: root, encoding, input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024, windowsHide: true });
 
 /** `cat-file --batch` output (`<sha> blob <size>\n<bytes>\n` or `<name> missing\n` per request) to the text of each requested path, null when missing. */
 export function parseBatch(buffer, paths) {
@@ -43,6 +44,16 @@ function commitFrom(output) {
     return sha ? { sha, parents: parents ? parents.split(' ') : [], date: isoDate(date), author, subject: subject.join('\t') } : null;
 }
 
+/** `git grep -n <ref>` output (`ref:file:line:text`) to hits. */
+const grepHits = (output, ref) => (output || '').split(/\r?\n/).filter(Boolean).map(line => {
+    const match = line.slice(ref.length + 1).match(/^(.+?):(\d+):(.*)$/);
+    return match ? { file: match[1], line: Number(match[2]), text: match[3].trim() } : null;
+}).filter(Boolean);
+
+/** `name` as a whole word in `text`, as `git grep -w` matches it. */
+export const hasWord = (text, name) => new RegExp(`(?<!\\w)${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!\\w)`).test(text);
+
+const GREP_CHUNK = 100; // names per `git grep`: stays far below the Windows command-line limit
 const HISTORY = new Map(); // root -> { key: 'HEAD sha|max', files }: the last commitFiles answer per repository
 
 export function createGit({ root, run = defaultRun } = {}) {
@@ -61,7 +72,11 @@ export function createGit({ root, run = defaultRun } = {}) {
             ...(tryGit('ls-files', '--others', '--exclude-standard', '-z') || '').split('\0').filter(Boolean).map(file => ({ status: 'A', path: file }))
         ].sort((a, b) => a.path.localeCompare(b.path)),
         readBlob: (ref, filePath) => tryGit('show', `${ref}:${filePath}`),
+        // a binary file (a Mendix .mpr or .mxunit), relative to `root` like readBlobs, as a Buffer; null when it is not there
+        readBlobBytes: (ref, filePath) => { try { return run(root, ['show', `${ref}:./${filePath}`], { encoding: null }); } catch { return null; } },
         logRange: (from, to, { max = 50 } = {}) => (tryGit('log', `-n${max}`, '--format=%h %s', `${from}..${to}`) || '').split(/\r?\n/).filter(Boolean),
+        // the commits in `to` and not in `from`, newest first: sha, parents, date, author, subject
+        commitList: (from, to, { max = 200 } = {}) => (tryGit('log', `-n${max}`, `--format=${COMMIT_FORMAT}`, `${from}..${to}`) || '').split(/\r?\n/).map(commitFrom).filter(Boolean),
         countRange: (from, to) => {
             const out = tryGit('rev-list', '--count', `${from}..${to}`);
             return out == null ? null : Number(out.trim());
@@ -87,12 +102,14 @@ export function createGit({ root, run = defaultRun } = {}) {
         // every file in the tree of `ref`, relative to `root` (paths outside it are not listed)
         listTree: ref => tryGit('ls-tree', '-r', '--name-only', '-z', ref)?.split('\0').filter(Boolean) ?? null,
         // text of many files at `ref` in a few processes (`cat-file --batch`); missing or non-file paths map to null
-        readBlobs: (ref, paths, { chunk = 500 } = {}) => {
+        // fromTop: the paths are relative to the repository top (as `git diff` lists them), not to `root`
+        readBlobs: (ref, paths, { chunk = 500, fromTop = false } = {}) => {
             const result = new Map();
+            const at = fromTop ? '' : './';
             for (let i = 0; i < paths.length; i += chunk) {
                 const part = paths.slice(i, i + chunk);
                 let out;
-                try { out = run(root, ['cat-file', '--batch'], { input: part.map(file => `${ref}:./${file}\n`).join(''), encoding: null }); } catch { out = null; }
+                try { out = run(root, ['cat-file', '--batch'], { input: part.map(file => `${ref}:${at}${file}\n`).join(''), encoding: null }); } catch { out = null; }
                 for (const [file, text] of out ? parseBatch(out, part) : part.map(file => [file, null])) result.set(file, text);
             }
             return result;
@@ -101,10 +118,17 @@ export function createGit({ root, run = defaultRun } = {}) {
         // paths are relative to the repository top; `prefix` is '' when `root` is that top
         prefix: () => tryGit('rev-parse', '--show-prefix')?.trim() ?? null,
         changedSince: (from, to) => tryGit('diff', '--name-only', '-z', '--no-renames', from, to)?.split('\0').filter(Boolean) ?? null,
-        grepRef: (ref, name, { max = 200 } = {}) => (tryGit('grep', '-n', '-w', '-F', '-I', '--no-color', '-e', name, ref, '--') || '').split(/\r?\n/).filter(Boolean).slice(0, max).map(line => {
-            const match = line.slice(ref.length + 1).match(/^(.+?):(\d+):(.*)$/);
-            return match ? { file: match[1], line: Number(match[2]), text: match[3].trim() } : null;
-        }).filter(Boolean),
+        grepRef: (ref, name, { max = 200 } = {}) => grepHits(tryGit('grep', '-n', '-w', '-F', '-I', '--no-color', '-e', name, ref, '--'), ref).slice(0, max),
+        // grepRef for many names in one `git grep` per chunk (one process per name took branch_impact past 2 minutes)
+        grepRefs: (ref, names, { max = 200 } = {}) => {
+            const result = new Map(names.map(name => [name, []]));
+            for (let i = 0; i < names.length; i += GREP_CHUNK) {
+                const part = names.slice(i, i + GREP_CHUNK);
+                const hits = grepHits(tryGit('grep', '-n', '-w', '-F', '-I', '--no-color', ...part.flatMap(name => ['-e', name]), ref, '--'), ref);
+                for (const name of part) result.set(name, hits.filter(hit => hasWord(hit.text, name)).slice(0, max));
+            }
+            return result;
+        },
         lastCommitFor: (from, to, filePath) => (tryGit('log', '-n1', '--format=%h %s', `${from}..${to}`, '--', filePath) || '').trim() || null,
         // `merge-tree --write-tree` exits 1 on conflicts and still prints them on stdout; older git: null
         conflicts: (a, b) => {

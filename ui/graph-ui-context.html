@@ -1,0 +1,84 @@
+<!-- Context of the code view of `lens ui`, inserted into graph-ui.html by graph-ui.mjs: the health of the file and its
+     functions (marked in the gutter), the function at the line (purpose, callers, calls, tests, documents, call tree,
+     flow diagram) and the file's imports both ways, then its history (loaded last, so the code never waits for git). -->
+<script>
+const ctxLink = (path, line, text, tab) => `<a class="ln-link"${tab ? ` data-tab="${tab}"` : ''} data-path="${esc(path)}" data-line="${line || 1}">${esc(text ?? path + (line ? ':' + line : ''))}</a>`;
+const ctxList = (title, items) => `<div class="ctx-block"><h4>${title} <span class="muted">(${items.length})</span></h4>` + (items.length ? `<ul>${items.map(i => `<li>${i}</li>`).join('')}</ul>` : '<p class="muted">geen</p>') + `</div>`;
+const issueBadges = issues => (issues || []).map(i => `<span class="badge ${/complex|cycle|pain|boundary/.test(i) ? 'danger' : 'warn'}">${esc(i)}</span>`).join(' ');
+let ctxSeq = 0, treeDepth = 2;
+
+function showHealth(health, line) {
+  const box = $('#code-health');
+  if (!box || !health) return;
+  const inside = (health.functions || []).filter(f => f.loc && f.loc[0] <= line && line <= f.loc[1]);
+  box.innerHTML = (health.issues?.length ? `<div class="ctx-health">Bestand: ${issueBadges(health.issues)}</div>` : '') +
+    inside.map(f => `<div class="ctx-health">Functie <strong>${esc(f.name)}</strong>: CC ${f.cyclomaticComplexity}, ${f.lines} regels ${issueBadges(f.issues)}</div>`).join('');
+  for (const f of health.functions || []) {
+    const ln = document.querySelector(`#code-view .ln[data-ln="${f.loc?.[0]}"]`);
+    if (ln) { ln.classList.add('warn'); ln.title = `${f.name}: CC ${f.cyclomaticComplexity}, ${f.lines} regels — ${(f.issues || []).join(', ')}`; }
+  }
+}
+
+/** One side of the call tree as nested lists that open per level: `up` follows callers, `down` callees. */
+function treeHtml(flow, id, up, seen = new Set([id])) {
+  const next = flow.edges.filter(e => (up ? e.to : e.from) === id).map(e => up ? e.from : e.to).filter(n => !seen.has(n));
+  if (!next.length) return '';
+  const byId = new Map(flow.nodes.map(n => [n.id, n]));
+  return '<ul class="ctx-tree">' + next.map(n => {
+    const node = byId.get(n), sub = treeHtml(flow, n, up, new Set([...seen, n])), link = ctxLink(node.path, node.line, node.name) + ` <span class="muted">${esc(node.path)}</span>`;
+    return `<li>${sub ? `<details${Math.abs(node.level) < treeDepth ? ' open' : ''}><summary>${link}</summary>${sub}</details>` : link}</li>`;
+  }).join('') + '</ul>';
+}
+
+async function showTree(symbol, path) {
+  const box = $('#ctx-tree');
+  if (!box) return;
+  const flow = await getJson(api(`/api/flow?symbol=${encodeURIComponent(symbol)}&path=${encodeURIComponent(path)}&depth=${treeDepth}`));
+  if (!flow.root) { box.innerHTML = '<p class="muted">Geen aanroepen op functieniveau voor deze taal: zie imports hieronder.</p>'; return; }
+  box.innerHTML = `<h4>Wie roept dit aan</h4>${treeHtml(flow, flow.root, true) || '<p class="muted">niemand</p>'}<h4>Wat roept dit aan</h4>${treeHtml(flow, flow.root, false) || '<p class="muted">niets</p>'}` + (flow.truncated ? '<p class="muted">Afgekapt: kies een kleinere diepte.</p>' : '');
+}
+
+async function showHistory(path, symbol) {
+  const box = $('#ctx-history');
+  if (!box) return;
+  const h = await getJson(api(`/api/history?path=${encodeURIComponent(path)}${symbol ? '&symbol=' + encodeURIComponent(symbol) : ''}`));
+  if (h.error) { box.innerHTML = ''; return; }
+  const who = h.lastChange ? `<p>Laatst gewijzigd door <strong>${esc(h.lastChange.author)}</strong> op ${esc(h.lastChange.date?.slice(0, 10))} (${esc(h.lastChange.sha)})</p>` : '';
+  box.innerHTML = `<h3 class="ctx-title">Geschiedenis${h.hotspot ? ' <span class="badge danger" title="veel wijzigingen maal veel regels">hotspot</span>' : ''} <span class="muted">${h.churn} commits op dit bestand</span></h3>` + who +
+    ctxList(symbol ? `Commits op ${esc(symbol)}` : 'Commits op het bestand', h.commits.map(c => `<code>${esc(c.sha)}</code> ${esc(c.date?.slice(0, 10))} <strong>${esc(c.author)}</strong> ${esc(c.subject)}${c.change ? ` <span class="muted">(${esc(c.change)})</span>` : ''}`)) +
+    ctxList('Verandert vaak samen met', h.coChanges.map(c => ctxLink(c.path) + ` <span class="muted">${c.weight}×</span>`));
+}
+
+async function showContext(path, line) {
+  const box = $('#code-ctx'), mine = ++ctxSeq;
+  if (!box) return;
+  box.innerHTML = '<p class="muted">Context laden…</p>';
+  const at = await getJson(api('/api/at?path=' + encodeURIComponent(path) + '&line=' + line));
+  if (mine !== ctxSeq) return;
+  showHealth(at.health, line);
+  nameCrumb(path, line, at.symbol);
+  const [fv, imp, by] = await Promise.all([at.symbol ? ask('functionView', { symbol: at.symbol }) : null, ask('imports', { file: path }), ask('importedBy', { file: path })]);
+  if (mine !== ctxSeq) return;
+  let html = '';
+  if (fv?.found) {
+    const def = (fv.definitions || []).find(d => d.path === path) || fv.definitions?.[0];
+    const docs = [...(fv.stories || []), ...(fv.callers || []).filter(c => c.reference && /\.md$/i.test(c.path))];
+    const seen = new Set();
+    html += `<h3 class="ctx-title">Functie <code>${esc(fv.symbol)}</code> ${ctxLink(path, line, 'Stroomschema ›', 'graph')}</h3>` + (def?.purpose ? `<p class="ctx-purpose">${esc(def.purpose)}</p>` : '') +
+      ctxList('Aanroepers', (fv.callers || []).filter(c => !c.reference).map(c => ctxLink(c.path, c.lines?.[0]) + (c.functions?.length ? ` <span class="muted">in ${esc(c.functions.join(', '))}</span>` : ''))) +
+      ctxList('Roept aan', (fv.calls || []).map(c => c.path ? ctxLink(c.path, c.lines?.[0], c.name) + ` <span class="muted">${esc(c.path)}</span>` : `${esc(c.name)} <span class="muted">(buiten de graaf)</span>`)) +
+      `<div class="ctx-block"><h4>Aanroepboom <label class="muted">diepte <select id="tree-depth">${[1, 2, 3, 4].map(d => `<option${d === treeDepth ? ' selected' : ''}>${d}</option>`).join('')}</select></label></h4><div id="ctx-tree"><p class="muted">Laden…</p></div></div>` +
+      ctxList('Tests', (fv.tests || []).map(t => ctxLink(t.path, t.lines?.[0]) + (t.names?.length ? ` <span class="muted">${esc(t.names[0])}</span>` : ''))) +
+      ctxList('Documentatie', docs.filter(d => !seen.has(d.path) && seen.add(d.path)).map(d => ctxLink(d.path, d.lines?.[0])));
+  } else {
+    html += `<p class="muted">Geen functie op regel ${line} (buiten een functie, of deze taal heeft geen functies in de graaf).</p>`;
+  }
+  html += `<h3 class="ctx-title">Bestand <code>${esc(path)}</code></h3>` +
+    ctxList('Importeert', (imp.files || []).map(f => ctxLink(f))) + ctxList('Geïmporteerd door', (by.files || []).map(f => ctxLink(f))) + '<div id="ctx-history"></div>';
+  box.innerHTML = html;
+  const depth = $('#tree-depth');
+  if (depth) depth.onchange = () => { treeDepth = Number(depth.value); showTree(at.symbol, path); };
+  if (fv?.found) showTree(at.symbol, path);
+  showHistory(path, fv?.found ? at.symbol : null);
+}
+</script>

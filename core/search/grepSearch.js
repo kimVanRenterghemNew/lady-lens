@@ -44,8 +44,16 @@ export function globToRegExp(pattern) {
     return new RegExp('^' + withSingleStar.replace(/__DS_DIR__/g, '(?:.*/)?').replace(/__DS__/g, '.*') + '$');
 }
 
+function matchFirstPerFile(lines, regex, offset, rel, found, state) {
+    const i = lines.findIndex(line => regex.test(line));
+    if (i < 0) return;
+    state.count += 1;
+    if (state.count > offset) found.push({ file: rel, line: i + 1, text: lines[i].trim() });
+}
+
 /** @param {{root?: string}} [deps] - the repo to search. */
-export function grep(args = {}, { root = REPO_ROOT } = {}) {
+/** `acceptFile(rel)` limits the search to some files BEFORE the result cap (config_grep: only configuration files). */
+export function grep(args = {}, { root = REPO_ROOT, acceptFile = () => true } = {}) {
     const { pattern, path: scopePath, firstPerFile = false } = args;
     const offset = Number.isInteger(Number(args.offset)) && Number(args.offset) > 0 ? Number(args.offset) : 0;
     if (typeof pattern !== 'string' || pattern.length === 0) return { error: 'pattern is required' };
@@ -66,7 +74,7 @@ export function grep(args = {}, { root = REPO_ROOT } = {}) {
 
     const search = (searchRoot, accept = () => true) => {
         const found = [];
-        let count = 0;
+        const state = { count: 0 };
         const searchFile = (file) => {
             const rel = relativeToRepo(file, root);
             if (!accept(rel)) return;
@@ -75,28 +83,27 @@ export function grep(args = {}, { root = REPO_ROOT } = {}) {
             if (text.includes('\0')) return; // binary (a Mendix .mpr, mxcli's catalog.db): its text is in readable files
             const lines = text.split('\n');
             if (firstPerFile) {
-                const i = lines.findIndex(line => regex.test(line));
-                if (i >= 0) { count += 1; if (count > offset) found.push({ file: rel, line: i + 1, text: lines[i].trim() }); }
+                matchFirstPerFile(lines, regex, offset, rel, found, state);
                 return;
             }
             lines.forEach((line, i) => {
                 if (!regex.test(line)) return;
-                count += 1;
-                if (count > offset && found.length < MAX_GREP_RESULTS) found.push({ file: rel, line: i + 1, text: line.trim() });
+                state.count += 1;
+                if (state.count > offset && found.length < MAX_GREP_RESULTS) found.push({ file: rel, line: i + 1, text: line.trim() });
             });
         };
         if (fs.existsSync(searchRoot) && fs.statSync(searchRoot).isFile()) searchFile(searchRoot);
         else walkFiles(searchRoot, searchFile, root);
-        return { found, count };
+        return { found, count: state.count };
     };
 
-    const { found: matches, count: totalCount } = search(scopeAbs, globRegex ? (rel) => globRegex.test(rel) : undefined);
+    const { found: matches, count: totalCount } = search(scopeAbs, (rel) => acceptFile(rel) && (!globRegex || globRegex.test(rel)));
     const result = { matches, totalCount, truncated: totalCount > offset + matches.length, ...(offset ? { offset } : {}) };
     if (totalCount === 0 && looksLikeRepoPath(pattern.replace(/\\(.)/g, '$1'))) {
         result.hint = 'No text matches. For "which files import X / what does X import" use importedBy({file}) / imports({file}); they read the import graph, grep cannot.';
     }
     if (totalCount === 0 && scopePath) {
-        const { found, count } = search(root);
+        const { found, count } = search(root, acceptFile);
         if (count > 0) {
             result.elsewhere = found.slice(0, 5).map(({ file, line }) => ({ file, line }));
             result.hint = `0 matches in ${scopePath}; ${count} elsewhere in the repo, e.g. ${result.elsewhere[0].file}:${result.elsewhere[0].line}. Search without path, or read that file.`;

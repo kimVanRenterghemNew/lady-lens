@@ -91,6 +91,44 @@ export function createDiscussionNode(record, { scope = 'session', now = new Date
     };
 }
 
+function resolveSourceTarget(source) {
+    if (typeof source === 'string') return source;
+    if (!source || typeof source !== 'object') return null;
+    const key = ['file', 'target', 'id', 'node'].find(k => source[k]);
+    return key ? source[key] : null;
+}
+
+function confidenceFromRelevance(rel) {
+    return rel >= 0.8 ? CONFIDENCE.EXTRACTED : CONFIDENCE.INFERRED;
+}
+
+function resolveSourceConfidence(source) {
+    if (!source || typeof source !== 'object') return CONFIDENCE.EXTRACTED;
+    if (source.confidence) return source.confidence;
+    if (source.relevance != null) return confidenceFromRelevance(source.relevance);
+    return CONFIDENCE.EXTRACTED;
+}
+
+function resolveSourceWeight(source) {
+    if (typeof source !== 'object' || source == null) return 0.5;
+    if (source.weight !== undefined) return source.weight;
+    return source.relevance ? Math.min(1, source.relevance / 10) : 0.5;
+}
+
+function resolveDiscussionEdgePair(discId, source, scope, now) {
+    const rawTarget = resolveSourceTarget(source);
+    const targetId = resolveTargetNodeId(rawTarget);
+    if (!targetId) return [];
+
+    const confidence = normalizeConfidence(resolveSourceConfidence(source));
+    const weight = resolveSourceWeight(source);
+    const baseEdge = { weight, confidence, scope, createdAt: now, updatedAt: now };
+    return [
+        { from: discId, to: targetId, type: 'DISCUSSES', relation: 'DISCUSSES', ...baseEdge },
+        { from: targetId, to: discId, type: 'DISCUSSED_IN', relation: 'DISCUSSED_IN', ...baseEdge }
+    ];
+}
+
 /**
  * Creates grounding edges for a discussion.
  * @param {string} discussionId
@@ -99,53 +137,6 @@ export function createDiscussionNode(record, { scope = 'session', now = new Date
  * @returns {Array}
  */
 export function createDiscussionEdges(discussionId, sources = [], { scope = 'session', now = new Date().toISOString() } = {}) {
-    const edges = [];
     const discId = normalizeNodeId(discussionId);
-
-    for (const source of sources) {
-        const rawTarget = typeof source === 'string' ? source : (source.file || source.target || source.id || source.node);
-        const targetId = resolveTargetNodeId(rawTarget);
-        if (!targetId) continue;
-
-        let conf = typeof source === 'object' ? source.confidence : null;
-        if (!conf) {
-            if (typeof source === 'object' && source.relevance !== undefined && source.relevance !== null) {
-                conf = source.relevance >= 0.8 ? CONFIDENCE.EXTRACTED : CONFIDENCE.INFERRED;
-            } else {
-                conf = CONFIDENCE.EXTRACTED;
-            }
-        }
-        const validConfidence = normalizeConfidence(conf);
-        const weight = (typeof source === 'object' && source.weight !== undefined)
-            ? source.weight
-            : ((typeof source === 'object' && source.relevance) ? Math.min(1, source.relevance / 10) : 0.5);
-
-        // Forward edge: Discussion discusses / grounds on target
-        edges.push({
-            from: discId,
-            to: targetId,
-            type: 'DISCUSSES',
-            relation: 'DISCUSSES',
-            weight,
-            confidence: validConfidence,
-            scope,
-            createdAt: now,
-            updatedAt: now
-        });
-
-        // Reverse edge: Target node is discussed in Discussion
-        edges.push({
-            from: targetId,
-            to: discId,
-            type: 'DISCUSSED_IN',
-            relation: 'DISCUSSED_IN',
-            weight,
-            confidence: validConfidence,
-            scope,
-            createdAt: now,
-            updatedAt: now
-        });
-    }
-
-    return edges;
+    return sources.flatMap(source => resolveDiscussionEdgePair(discId, source, scope, now));
 }

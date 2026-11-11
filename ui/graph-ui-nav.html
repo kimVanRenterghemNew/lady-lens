@@ -1,0 +1,54 @@
+<!-- One place for the whole page of `lens ui`, inserted into graph-ui.html by graph-ui.mjs: the tab, file and line you
+     are at. Every click in any tab is a step; the URL hash holds the place, so the browser's Back/Forward and a copied
+     link bring you back to it, and the crumbs show where you were. -->
+<script>
+const TABS = ['search', 'trace', 'health', 'graph'];
+let here = { tab: 'search', path: null, line: null };
+let trail = [];   // places with code you visited, newest last, each once
+let traceMarks = new Set();   // `path#symbol` of the frames of the last pasted stack trace (marked in the flow diagram)
+
+const placeHash = place => '#' + new URLSearchParams(Object.entries(place).filter(([, v]) => v != null && v !== '').map(([k, v]) => [k, String(v)])).toString();
+function placeFromHash() {
+  const q = new URLSearchParams(location.hash.slice(1));
+  return { tab: TABS.includes(q.get('tab')) ? q.get('tab') : 'search', path: q.get('path') || null, line: Number(q.get('line')) || null };
+}
+
+/** A step to `next` (merged into where you are): a new history entry, unless nothing changes. */
+function go(next) {
+  const place = { ...here, ...next };
+  if (placeHash(place) !== placeHash(here)) history.pushState(null, '', placeHash(place));
+  show(place);
+}
+
+function startAt(place) {
+  history.replaceState(null, '', placeHash(place));
+  show(place);
+}
+
+function show(place) {
+  const moved = place.path && (place.path !== here.path || place.line !== here.line || !$('#code-ctx'));
+  here = place;
+  for (const el of document.querySelectorAll('.tab-btn, .tab-pane')) el.classList.toggle('active', el.dataset.tab === place.tab || el.id === `view-${place.tab}`);
+  $(`#view-${place.tab}`).load?.();
+  if (moved) {
+    const line = place.line || 1;
+    showCode(place.path, Math.max(1, line - 5), line + 30, line);
+    trail = [...trail.filter(p => p.path !== place.path || p.line !== place.line), { path: place.path, line: place.line }].slice(-8);
+  }
+  drawCrumbs();
+}
+
+function drawCrumbs() {
+  $('#crumbs').innerHTML = `<button class="crumb-step" data-step="-1" title="Terug">◀</button><button class="crumb-step" data-step="1" title="Vooruit">▶</button>` +
+    trail.map(p => `<a class="ln-link crumb${p.path === here.path && p.line === here.line ? ' here' : ''}" data-tab="${here.tab === 'graph' ? 'graph' : 'search'}" data-path="${esc(p.path)}" data-line="${p.line || 1}" title="${esc(p.path)}:${p.line || 1}">${esc((p.symbol ? p.symbol + ' · ' : '') + p.path.split('/').pop())}:${p.line || 1}</a>`).join('<span class="muted">›</span>');
+}
+
+/** The function at the current place, once known (from /api/at), names its crumb. */
+function nameCrumb(path, line, symbol) {
+  const crumb = trail.find(p => p.path === path && p.line === line);
+  if (crumb && symbol && crumb.symbol !== symbol) { crumb.symbol = symbol; drawCrumbs(); }
+}
+
+window.addEventListener('popstate', () => show(placeFromHash()));
+document.addEventListener('click', e => { const step = e.target.closest('.crumb-step'); if (step) history.go(Number(step.dataset.step)); });
+</script>

@@ -1,3 +1,11 @@
+const indentOf = (line) => {
+    const match = line.match(/^[ \t]*/);
+    return match ? match[0].length : 0;
+};
+
+const isCommentLine = (trimmed) => trimmed.startsWith('#') || trimmed.startsWith('//');
+const isBlockBoundary = (line, trimmed, initialIndent) => Boolean(trimmed) && !isCommentLine(trimmed) && indentOf(line) <= initialIndent;
+
 export function findIndentedBlockEnd(source, startIndex) {
     const lineStart = source.lastIndexOf('\n', startIndex) + 1;
     const initialIndentMatch = source.slice(lineStart).match(/^[ \t]*/);
@@ -13,14 +21,8 @@ export function findIndentedBlockEnd(source, startIndex) {
         const line = source.slice(currentIndex, lineEnd);
         const trimmed = line.trim();
 
-        if (trimmed.length > 0 && !trimmed.startsWith('#') && !trimmed.startsWith('//')) {
-            const indentMatch = line.match(/^[ \t]*/);
-            const lineIndent = indentMatch ? indentMatch[0].length : 0;
-            if (lineIndent <= initialIndent) return Math.max(startIndex, currentIndex - 1);
-            lastValidIndex = lineEnd;
-        } else if (trimmed.length > 0) {
-            lastValidIndex = lineEnd;
-        }
+        if (isBlockBoundary(line, trimmed, initialIndent)) return Math.max(startIndex, currentIndex - 1);
+        if (trimmed) lastValidIndex = lineEnd;
         if (nextNl === -1) break;
         currentIndex = nextNl + 1;
     }

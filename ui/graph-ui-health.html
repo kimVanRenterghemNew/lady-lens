@@ -1,0 +1,27 @@
+<!-- The Architecture & Health tab of `lens ui`, inserted into graph-ui.html by graph-ui.mjs: every file and function in
+     it is a link to its place in the code. -->
+<script>
+function renderPainHtml(pain) {
+  if (!pain || !pain.length) return '';
+  return `<div class="pain-alert"><strong>Zone of Pain Hotspots (${pain.length}):</strong> ` + pain.map(p => `<a class="ln-link" data-path="${esc(p.path)}" data-line="1">${esc(p.path)}</a> (I=${p.instability})`).join(', ') + `</div>`;
+}
+
+function renderSmellsRows(smells) {
+  if (!smells || !smells.length) return '<p class="muted">Geen ontwerpgeuren gedetecteerd.</p>';
+  return `<table class="data-table"><thead><tr><th>Geur</th><th>Locatie</th><th>Advies (Patroon)</th></tr></thead><tbody>` + smells.map(sm => `<tr><td><span class="badge warn">${esc(sm.issue)}</span></td><td><a class="ln-link" data-path="${esc(sm.file)}" data-line="${sm.line}">${esc(sm.file)}:${sm.line}</a></td><td>${esc(sm.advice)}</td></tr>`).join('') + `</tbody></table>`;
+}
+
+define('lens-health', {
+  async load() {
+    const h = await getJson(api('/api/health')), s = h.summary || {}, pain = h.zoneOfPain || [], c = h.topCentralNodes || [], f = h.complexFunctions || [];
+    $('#health-stats').innerHTML = `<div class="stat-item"><span class="stat-val">${s.files || 0}</span><span class="stat-lbl">Bestanden</span></div><div class="stat-item"><span class="stat-val">${s.inCycles || 0}</span><span class="stat-lbl">In Cycli</span></div><div class="stat-item"><span class="stat-val">${s.untested || 0}</span><span class="stat-lbl">Ongestest</span></div><div class="stat-item"><span class="stat-val">${pain.length}</span><span class="stat-lbl">Zone of Pain</span></div><div class="stat-item"><span class="stat-val">${f.length}</span><span class="stat-lbl">Complexe Functies</span></div><div class="stat-item"><span class="stat-val">${s.designSmells ?? 0}</span><span class="stat-lbl">Ontwerpgeuren</span></div>`;
+    const fileLink = path => `<a class="ln-link" data-path="${esc(path)}" data-line="1">${esc(path)}</a>`;
+    $('#health-cycles').innerHTML = (h.cycles || []).length ? h.cycles.map(cy => `<p><strong>${cy.size} bestanden</strong>, kortste lus: ${cy.shortest.map(fileLink).join(' → ')}</p>`).join('') : '<p class="muted">Geen importcycli.</p>';
+    $('#health-hotspots').innerHTML = (h.hotspots || []).length ? `<table class="data-table"><thead><tr><th>Bestand</th><th>Commits</th><th>Regels</th></tr></thead><tbody>` + h.hotspots.map(x => `<tr><td>${fileLink(x.path)}</td><td>${x.churn}</td><td>${x.lines}</td></tr>`).join('') + `</tbody></table>` : '<p class="muted">Geen hotspots (of geen git).</p>';
+    $('#health-pain').innerHTML = renderPainHtml(pain);
+    $('#health-central-table').innerHTML = c.length ? `<table class="data-table"><thead><tr><th>Bestand</th><th>Centraliteit</th><th>Ca</th><th>Ce</th><th>Instabiliteit I</th></tr></thead><tbody>` + c.map(x => `<tr><td><a class="ln-link" data-path="${esc(x.path)}" data-line="1">${esc(x.path)}</a></td><td>${x.centralityScore}</td><td>${x.afferentCoupling}</td><td>${x.efferentCoupling}</td><td>${x.instability}</td></tr>`).join('') + `</tbody></table>` : '<p class="muted">Geen data</p>';
+    $('#health-complex-table').innerHTML = f.length ? `<table class="data-table"><thead><tr><th>Functie</th><th>Bestand</th><th>CC</th><th>Regels</th><th>Issues</th></tr></thead><tbody>` + f.slice(0, 15).map(x => `<tr><td><a class="ln-link" data-tab="graph" data-path="${esc(x.file)}" data-line="${x.loc[0]}" title="stroomschema">${esc(x.name)}</a></td><td><a class="ln-link" data-path="${esc(x.file)}" data-line="${x.loc[0]}">${esc(x.file)}:${x.loc[0]}</a></td><td><span class="badge ${x.cyclomaticComplexity > 15 ? 'danger' : 'warn'}">${x.cyclomaticComplexity}</span></td><td>${x.lines}</td><td>${(x.issues || []).map(i => `<span class="badge neutral">${esc(i)}</span>`).join(' ')}</td></tr>`).join('') + `</tbody></table>` : '<p class="muted">Geen complexe functies gevonden (CC &le; 15).</p>';
+    $('#health-smells-table').innerHTML = renderSmellsRows(h.designSmells);
+  }
+});
+</script>

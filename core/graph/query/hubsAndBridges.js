@@ -17,6 +17,38 @@ function fileGraph(graph) {
     return neighbours;
 }
 
+function bfsForwardPass(source, adjacent, distance, paths, before, order) {
+    distance.fill(-1); paths.fill(0);
+    distance[source] = 0; paths[source] = 1;
+    let head = 0, tail = 0;
+    order[tail++] = source;
+    while (head < tail) {
+        const node = order[head++];
+        adjacent[node].forEach(next => {
+            if (distance[next] < 0) {
+                distance[next] = distance[node] + 1;
+                order[tail++] = next;
+            }
+            if (distance[next] === distance[node] + 1) {
+                paths[next] += paths[node];
+                before[next].push(node);
+            }
+        });
+    }
+    return tail;
+}
+
+function accumulateBackwards(tail, order, before, paths, delta, score) {
+    delta.fill(0);
+    for (let i = tail - 1; i > 0; i--) {
+        const node = order[i];
+        before[node].forEach(previous => {
+            delta[previous] += (paths[previous] / paths[node]) * (1 + delta[node]);
+        });
+        score[node] += delta[node];
+    }
+}
+
 /** Brandes for an unweighted, undirected graph; each pair counted once. Nodes are numbered so the inner loops use typed arrays. */
 function betweenness(neighbours) {
     const names = [...neighbours.keys()];
@@ -27,22 +59,8 @@ function betweenness(neighbours) {
     const order = new Int32Array(n);
     for (let source = 0; source < n; source++) {
         const before = names.map(() => []);
-        distance.fill(-1); paths.fill(0); delta.fill(0);
-        distance[source] = 0; paths[source] = 1;
-        let head = 0, tail = 0;
-        order[tail++] = source;
-        while (head < tail) {
-            const node = order[head++];
-            for (const next of adjacent[node]) {
-                if (distance[next] < 0) { distance[next] = distance[node] + 1; order[tail++] = next; }
-                if (distance[next] === distance[node] + 1) { paths[next] += paths[node]; before[next].push(node); }
-            }
-        }
-        for (let i = tail - 1; i > 0; i--) {
-            const node = order[i];
-            for (const previous of before[node]) delta[previous] += (paths[previous] / paths[node]) * (1 + delta[node]);
-            score[node] += delta[node];
-        }
+        const tail = bfsForwardPass(source, adjacent, distance, paths, before, order);
+        accumulateBackwards(tail, order, before, paths, delta, score);
     }
     return new Map(names.map((name, i) => [name, score[i] / 2]));
 }

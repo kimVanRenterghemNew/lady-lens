@@ -10,19 +10,16 @@ lady-lens grew inside the build of our own coding agent, Kura. We used it there 
 
 ## Setup
 
-Needs Node.js 18 or newer. Run these steps once, in order.
+Needs Node.js 18 or newer; the Mendix MDL export needs 22.13 or newer (see [Another Node for lens](#another-node-for-lens)). Run these steps once, in order.
 
-**1. Install lady-lens** (it is not on npmjs.org; install it from a package built here):
+**1. Install lady-lens** from npm:
 
 ```
-cd C:\git\lady-lens
-npm install                   # dependencies of lady-lens itself
-npm run pack                  # builds dist\lady-lens-<version>.tgz
-npm install -g .\dist\lady-lens-<version>.tgz
+npm install -g lady-lens
 lens v                        # prints the version: `lens` is on your PATH
 ```
 
-For development, `npm link` instead of the last install step makes `lens` run straight from this folder.
+From source instead (development, or a version that is not published yet): run `npm install` and `npm run pack` in this folder, which builds `dist\lady-lens-<version>.tgz`, and install that with `npm install -g .\dist\lady-lens-<version>.tgz` (later: `lens update .\dist\lady-lens-<version>.tgz`). `npm link` makes `lens` run straight from this folder.
 
 **2. Register your repository and index it:**
 
@@ -37,6 +34,7 @@ lens list                     # check that it is there
 lens install                  # MCP entry (stdio) in every agent found; or name one: lens install vscode
 lens install --skill          # the Lady-lens workflow skill for those agents
 lens install --mendix         # the Mendix skill (search .mpr content via .mxcli/mdl, change it with mxcli)
+lens install skill-mendix vscode claude-code   # the same, only for those agents
 ```
 
 `lens install --dry-run` shows what would change and writes nothing. Restart the agent afterwards (in VS Code: *MCP: List Servers* or reload the window).
@@ -51,17 +49,32 @@ lens stop                     # stop it
 
 In VS Code add it to `mcp.json` as `{ "servers": { "lady-lens": { "type": "http", "url": "http://127.0.0.1:4318/mcp?repo=C:/git/my-project" } } }`. See [MCP Configuration](#mcp-configuration-model-context-protocol) for the other agents.
 
-**5. Update later** with one command: it stops lens, installs the newest package from `dist` and starts the daemon again:
+**5. Update later** with one command:
 
 ```
-.\scripts\update-lens.ps1 -Pack     # build a fresh package from this source first
-.\scripts\update-lens.ps1           # only install the newest package already in dist
+lens update                   # the newest version from npm
+lens update 1.2.8             # a given version
+lens update C:\path\lady-lens-1.2.8.tgz   # a package file (a machine without npm access, or a build from source)
 ```
+
+`lens update` stops every lens process (on Windows a running lens keeps the graph database module open, and npm cannot replace it), installs the package, lets the new lens re-register itself in the agents where it was registered and copy the installed skills and instruction files again (`lens install --refresh`: the `SKILL.md` files and `~/.lady-lens/lens-instructions.md`; your own `CLAUDE.md` or `AGENTS.md` only holds a link to it), and starts the daemon again if it ran. It adds nothing you did not install. Reconnect your agents afterwards (Claude Code: `/mcp`).
+
+### Another Node for lens
+
+The Mendix MDL export needs Node 22.13 or newer (`node:sqlite`). When your projects need an older Node on PATH (nvm), let only lens run on a newer one; PATH and nvm stay as they are:
+
+```
+lens node "C:\Program Files\nodejs\node.exe"   # lens, its daemon and the agent registrations now run on that Node
+lens node                                      # which Node lens runs on
+lens node --clear                              # back to the Node on PATH
+```
+
+The choice is kept in `~/.lady-lens/lens.json`: it holds at once, in every terminal and for agents started from the desktop (`setx` only reaches terminals started later). The package stays where npm installed it. Ladybug's native module works on every Node version. 
 
 ## Use
 
 ```
-lens sync                     # index this repo (incremental; --full re-indexes everything)
+lens sync                     # index this repo (incremental; --full re-indexes everything; --debug logs every step to ~/.lady-lens/logs)
 lens mcp                      # MCP server (Streamable HTTP on /mcp, UI dashboard on 4317)
 lens mcp -d                   # run MCP + UI in background (detached)
 lens stop                     # stop background lady-lens daemon
@@ -71,7 +84,7 @@ lens ask functionView '{"symbol":"createGraphSync"}'
 lens ask importedBy '{"file":"core/graph/index.js"}'
 lens ask graph_query '{"query":"plan review"}'
 lens ask graph_query '{"query":"plan review","kind":"doc"}'   # only the documentation
-lens ui                       # http://127.0.0.1:4317: search, nodes coloured per type, code and docs
+lens ui                       # http://127.0.0.1:4317: search, stack trace, nodes coloured per type, code and docs
 lens list                     # every repo lens knows
 lens add <dir>                # register a repository and sync
 lens remove <id|dir>          # unregister a repository
@@ -79,6 +92,15 @@ lens tools                    # every question and what it answers
 ```
 
 `--repo <dir>` asks about another repo than the current folder; `lens ui --port 5000` picks another port.
+
+The four tabs of the dashboard are one whole: there is one place (tab, file, line) for the page, kept in the URL (`#tab=…&path=…&line=…`), so the browser's Back/Forward, the ◀ ▶ buttons and the crumbs under the tabs step through where you were, and a copied link opens the same place. Every file or function in any tab is a link to it.
+
+- **Search & Explorer**: the code with the line you went to; functions with health issues are marked ⚠ in the gutter, the file's and the function's issues stand above the code. Under it: the function at the line (purpose, callers, calls, a call tree that opens per level with a chosen depth, tests, the documents that name it), the file's imports both ways, and, loaded last, its history: the commits that changed the function (else the file), who changed it last, the files that usually change with it, and a hotspot sign (commits × lines in the project's top 10).
+- **Graph Network**: at a function, the flow diagram of its call chain (callers left, callees right, depth and direction to choose); a click on a function goes there, **Mermaid** shows and copies the text for a document or ticket. At a file or without a place: the overview of files.
+- **Architecture & Health**: every file and function opens its code, a function name its flow diagram.
+- **Stacktrace**: see below; a frame opens its code or its flow diagram, where the frames of the trace are marked.
+
+In the dashboard's **Stacktrace** tab you paste a Node, .NET, Python or Java stack trace: each frame shows its file, line, function and the code around the line. Paths from another machine (`C:\build\...`, `/home/ci/...`) match the project file with the longest equal tail of folders; several equal matches let you choose, no match says "niet gevonden", library frames (`node_modules`, `site-packages`, frames without a file) are folded away. The page posts the trace to `POST /api/trace` (follows `?repo=`).
 
 ## Questions
 
@@ -98,6 +120,7 @@ lens tools                    # every question and what it answers
 | `config_update` | safely replace one config file and refresh its graph facts; supports `expectedHash` |
 | `repo_sync` | index the repository; records the branch and commit and reports `commitsSince`; `branch: "<name>"` indexes another branch into its own scope `branch:<name>` without checking it out |
 | `branch_diff` | what branch `to` changes since its merge-base with `from`: files and functions added, removed, modified, renamed, plus changed import and call relations |
+| `mendix_diff` | Mendix model changes of a branch, read from git (no checkout, no mxcli; old single-file .mpr and mprcontents/): commits, changed documents with module, folder, name and type, every added, deleted or modified element with each property before and after, and for a microflow or nanoflow the flow graph before and after with a status per node and sequence flow. Data for a client that shows it (an extension); needs Node 22.13+ (`lens node`) |
 | `branch_impact` | what a change on one branch (e.g. a bugfix on `release`) means for another: functions still used there, overlap, shared files, text merge conflicts |
 | `commit_show` | what one commit changed (files and functions against its first parent) |
 | `function_history` | the commits that added, modified or removed one function; without `name` every commit that touched the file |
@@ -113,6 +136,7 @@ Compare before you merge:
 branch_diff    { "from": "main", "to": "feature-x" }
 branch_impact  { "change": "release", "against": "feature-x" }
 commit_show    { "commit": "263e4279" }
+mendix_diff    { "from": "ere", "to": "bugfix/59195-OUT_TANK-proposed-destination-is-wrong" }
 diff_impact    { }                                   # the work not committed yet
 diff_impact    { "from": "main" }                     # this branch since it left main
 function_history { "name": "createGraphSync", "file": "core/graph/sync/graphSync.js" }
@@ -128,7 +152,7 @@ lady-lens can be used by AI coding assistants (Antigravity, Cursor, Claude Deskt
 
 ```bash
 lens install              # every agent found on this machine
-lens install cursor vscode  # or name them: claude-code, claude-desktop, cursor, windsurf, gemini-cli, antigravity, vscode, codex, vibe
+lens install cursor vscode  # or name them: claude-code, claude-desktop, cursor, windsurf, gemini-cli, antigravity, antigravity-cli, vscode, codex, vibe
 lens install --dry-run    # show what would change, write nothing
 lens install --skill      # install the Lady-lens workflow skill for detected agents
 lens install --skill --dry-run
@@ -210,6 +234,7 @@ If you prefer the agent to spawn lady-lens directly on demand:
 
 ### Client Config Locations:
 - **Google Antigravity**: `%USERPROFILE%\.gemini\antigravity\mcp_config.json`
+- **Antigravity CLI**: `%USERPROFILE%\.gemini\config\mcp_config.json`. It takes stdio or Streamable HTTP (`/mcp`) only; an `/sse` url does not work there. `lens install antigravity-cli` writes a stdio entry: no daemon, no port, and no loopback call that the agent's sandbox might block.
 - **Gemini CLI**: `%USERPROFILE%\.gemini\settings.json`
 - **Claude Code**: `%USERPROFILE%\.claude.json`
 - **Windsurf**: `%USERPROFILE%\.codeium\windsurf\mcp_config.json`
@@ -282,7 +307,7 @@ lady-lens can be configured fully through a **`config.json`** file in the root o
     "graph_extensions": [".js", ".mjs", ".ts", ".cs", ".md", ".json"]
   },
   "graph": {
-    "ast": { "enabled": true },
+    "ast": { "enabled": false },
     "documentation": { "enabled": true }
   },
   "mcp": {

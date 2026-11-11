@@ -11,6 +11,14 @@
  * @module core/language/fuzzy
  */
 
+const isAdjacentSwap = (s, t, i, j) => i > 1 && j > 1 && s[i - 1] === t[j - 2] && s[i - 2] === t[j - 1];
+
+function computeCell(d, s, t, i, j) {
+    const cost = s[i - 1] === t[j - 1] ? 0 : 1;
+    const base = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+    return isAdjacentSwap(s, t, i, j) ? Math.min(base, d[i - 2][j - 2] + 1) : base;
+}
+
 /** Optimal-string-alignment distance: insert, delete, substitute, swap two adjacent letters = 1 each. */
 export function editDistance(a, b) {
     const s = String(a), t = String(b);
@@ -18,9 +26,7 @@ export function editDistance(a, b) {
     for (let j = 1; j <= t.length; j++) d[0][j] = j;
     for (let i = 1; i <= s.length; i++) {
         for (let j = 1; j <= t.length; j++) {
-            const cost = s[i - 1] === t[j - 1] ? 0 : 1;
-            d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-            if (i > 1 && j > 1 && s[i - 1] === t[j - 2] && s[i - 2] === t[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+            d[i][j] = computeCell(d, s, t, i, j);
         }
     }
     return d[s.length][t.length];

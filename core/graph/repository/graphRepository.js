@@ -24,6 +24,9 @@ export function configureGraphStore(factory = createLadybugRepositoryStore) {
     storeFactory = factory;
 }
 
+// contributors (Mendix, also its cached contributions on disk) name the relation `type`; the stores read `relation`
+const withRelationName = (relations) => relations.map(r => (r.relation ? r : { ...r, relation: r.type }));
+
 /** Validate everything BEFORE the first write, so a bad edge never leaves a half-replaced scope behind. */
 function assertValidRelations(relations) {
     for (const relation of relations) {
@@ -50,7 +53,7 @@ export function createGraphRepository({ databasePath, open, store } = {}) {
         scopeFiles: (scope) => backend.projectFiles(scope),
         async applyScopeChanges(scope, { upserts = [], removePaths = [], relations = [] } = {}) {
             assertValidRelations(relations);
-            return backend.applyProjectChanges(scope, { upserts, removePaths, relations });
+            return backend.applyProjectChanges(scope, { upserts, removePaths, relations: withRelationName(relations) });
         },
 
         /**
@@ -59,7 +62,7 @@ export function createGraphRepository({ databasePath, open, store } = {}) {
          */
         async applyProjectChanges({ upserts = [], removePaths = [], relations = [] } = {}) {
             assertValidRelations(relations);
-            return backend.applyProjectChanges(PROJECT_SCOPE, { upserts, removePaths, relations });
+            return backend.applyProjectChanges(PROJECT_SCOPE, { upserts, removePaths, relations: withRelationName(relations) });
         },
 
         /** Replace everything in one scope (e.g. a session's governance graph) with `nodes`/`edges` DTOs. */

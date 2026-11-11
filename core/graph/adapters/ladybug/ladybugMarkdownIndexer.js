@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import path from 'path';
 import { parseFrontmatter } from '../../../configuration/index.js';
-import { normalizeNodeId, parseDecisions } from '../../index.js';
+import { normalizeNodeId, parseDecisions } from '../../model/index.js';
 import { normalizeRelativePath } from '../../../repository/index.js';
 
 function markdownBody(source) {

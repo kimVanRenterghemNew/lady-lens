@@ -12,8 +12,20 @@ import path from 'path';
 export const LENS_HOME = process.env.LENS_HOME || path.join(os.homedir(), '.lady-lens');
 export const REGISTRY_FILE = path.join(LENS_HOME, 'repos.json');
 
+/**
+ * One spelling per folder: a Windows 8.3 short name (C:\Users\KIM~1.VAN) becomes the long one, so `lens add` from the
+ * short path and `lens sync` from the long one are the same repo. Only paths with a `~` are expanded: realpath would also
+ * follow symlinks and junctions and so change the id (and database) of repos that are already registered.
+ */
+export function canonicalRepoPath(repoPath) {
+    const resolved = path.resolve(repoPath);
+    if (!resolved.includes('~')) return resolved;
+    try { return fs.realpathSync.native(resolved); } catch { return resolved; }
+}
+const samePath = (a, b) => canonicalRepoPath(a).toLowerCase() === canonicalRepoPath(b).toLowerCase();
+
 export function idOfRepo(repoPath) {
-    const normalized = path.resolve(repoPath).toLowerCase();
+    const normalized = canonicalRepoPath(repoPath).toLowerCase();
     return crypto.createHash('sha1').update(normalized).digest('hex').slice(0, 12);
 }
 
@@ -44,30 +56,33 @@ export function listRegisteredRepos(registryFile = REGISTRY_FILE) {
     return Object.values(registry.repos || {});
 }
 
+function resolveGitDir(dir) {
+    const gitPath = path.join(dir, '.git');
+    if (!fs.existsSync(gitPath)) return null;
+    if (!fs.statSync(gitPath).isFile()) return gitPath;
+    const match = fs.readFileSync(gitPath, 'utf8').trim().match(/^gitdir:\s*(.+)$/i);
+    return match ? path.resolve(dir, match[1]) : gitPath;
+}
+
+function parseHeadRef(headFile) {
+    if (!fs.existsSync(headFile)) return null;
+    const head = fs.readFileSync(headFile, 'utf8').trim();
+    if (head.startsWith('ref: refs/heads/')) return head.replace('ref: refs/heads/', '');
+    return head.slice(0, 8);
+}
+
 export function currentGitBranch(dir) {
     try {
-        let gitPath = path.join(dir, '.git');
-        if (!fs.existsSync(gitPath)) return null;
-        const stat = fs.statSync(gitPath);
-        if (stat.isFile()) {
-            const gitdirContent = fs.readFileSync(gitPath, 'utf8').trim();
-            const match = gitdirContent.match(/^gitdir:\s*(.+)$/i);
-            if (match) gitPath = path.resolve(dir, match[1]);
-        }
-        const headFile = path.join(gitPath, 'HEAD');
-        if (fs.existsSync(headFile)) {
-            const head = fs.readFileSync(headFile, 'utf8').trim();
-            if (head.startsWith('ref: refs/heads/')) return head.replace('ref: refs/heads/', '');
-            return head.slice(0, 8);
-        }
+        const gitPath = resolveGitDir(dir);
+        if (!gitPath) return null;
+        return parseHeadRef(path.join(gitPath, 'HEAD'));
     } catch {
-        // Not a git repo or unreadable
+        return null;
     }
-    return null;
 }
 
 export function registerRepo(repoPath, extra = {}, registryFile = REGISTRY_FILE) {
-    const resolved = path.resolve(repoPath);
+    const resolved = canonicalRepoPath(repoPath);
     const id = idOfRepo(resolved);
     const registry = readRegistry(registryFile);
     let database = extra.database;
@@ -114,8 +129,7 @@ export function findRegisteredRepo(idOrPath, registryFile = REGISTRY_FILE) {
     if (!idOrPath) return null;
     const { repos } = readRegistry(registryFile);
     if (repos[idOrPath]) return repos[idOrPath];
-    const resolved = path.resolve(idOrPath).toLowerCase();
-    return Object.values(repos).find(r => path.resolve(r.path).toLowerCase() === resolved) || null;
+    return Object.values(repos).find(r => samePath(r.path, idOrPath)) || null;
 }
 
 export function resolveRepoTarget(idOrPath, registryFile = REGISTRY_FILE) {
@@ -125,8 +139,8 @@ export function resolveRepoTarget(idOrPath, registryFile = REGISTRY_FILE) {
     const id = idOfRepo(idOrPath);
     if (registry.repos[id]) return registry.repos[id];
 
-    const resolved = path.resolve(idOrPath);
-    const byPath = Object.values(registry.repos).find(r => path.resolve(r.path).toLowerCase() === resolved.toLowerCase());
+    const resolved = canonicalRepoPath(idOrPath);
+    const byPath = Object.values(registry.repos).find(r => samePath(r.path, resolved));
     if (byPath) return byPath;
 
     return {

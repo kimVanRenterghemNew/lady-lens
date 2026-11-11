@@ -21,22 +21,29 @@ export function readRepoFile(rel) {
 const COVERAGE_SUMMARIES = ['coverage/coverage-summary.json', 'outputs/coverage/coverage-summary.json'];
 let coverageCache = null;
 
+function readCoverageCandidate(abs) {
+    try {
+        const stat = fs.statSync(abs);
+        if (coverageCache && coverageCache.abs === abs && coverageCache.mtimeMs === stat.mtimeMs) {
+            return coverageCache.result;
+        }
+        const coverage = coverageFromSummary(JSON.parse(fs.readFileSync(abs, 'utf8')), (file) => {
+            const rel = relativeToRepo(file);
+            return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : null;
+        });
+        const result = { coverage, from: { file: relativeToRepo(abs), date: stat.mtime.toISOString().slice(0, 10) } };
+        coverageCache = { abs, mtimeMs: stat.mtimeMs, result };
+        return result;
+    } catch {
+        return null;
+    }
+}
+
 export function loadCoverage() {
     for (const candidate of [lensEnv('COVERAGE_SUMMARY'), ...COVERAGE_SUMMARIES].filter(Boolean)) {
         const abs = path.isAbsolute(candidate) ? candidate : path.join(REPO_ROOT, candidate);
-        try {
-            const stat = fs.statSync(abs);
-            if (coverageCache && coverageCache.abs === abs && coverageCache.mtimeMs === stat.mtimeMs) {
-                return coverageCache.result;
-            }
-            const coverage = coverageFromSummary(JSON.parse(fs.readFileSync(abs, 'utf8')), (file) => {
-                const rel = relativeToRepo(file);
-                return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : null;
-            });
-            const result = { coverage, from: { file: relativeToRepo(abs), date: stat.mtime.toISOString().slice(0, 10) } };
-            coverageCache = { abs, mtimeMs: stat.mtimeMs, result };
-            return result;
-        } catch { /* no summary here, or unreadable: try the next */ }
+        const result = readCoverageCandidate(abs);
+        if (result) return result;
     }
     return { coverage: new Map(), from: null };
 }

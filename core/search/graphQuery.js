@@ -7,78 +7,189 @@ import {
     locateSymbols,
     IMPORT_EDGE,
     rankGraphNodes,
+    nodeMatchesKind,
     answerNode,
     fileImpact
 } from '../graph/index.js';
 import { loadGraphModel, freshnessFor, readRepoFile, loadCoverage } from './graphModelLoader.js';
 import { rankDocuments } from './docMentions.js';
+import { validateQueryArgs, normalizeQueryArgs } from './graphQueryArgs.js';
 
-const SESSION_ID = /^[a-zA-Z0-9._-]+$/;
 const IMPORT_QUERY_LIMIT = 5000;
 
-export async function graph_query(args = {}) {
-    const { sessionId = 'default', node, query: text, outgoing, incoming, path: traversalPath, maxDepth, incomingDepth, outgoingDepth, filter, limit = 10, minWeight = 0 } = args;
-    if ((node !== undefined && typeof node !== 'string') || (text !== undefined && typeof text !== 'string')) {
-        return { error: 'node and query must be strings when provided' };
-    }
-    if (!node && !text) return { error: 'graph_query requires node or query' };
-    if (typeof sessionId !== 'string' || !SESSION_ID.test(sessionId)) {
-        return { error: 'sessionId must contain only letters, numbers, dots, dashes, or underscores' };
-    }
-    let loaded;
-    try {
-        loaded = await loadGraphModel({ sessionId, text, includeProject: args.projectGraph !== false && isProjectGraphEnabled(), includeDocs: args.includeDocs || args.kind === 'doc', history: args.history === true });
-    } catch (error) {
-        return { available: false, sessionId, source: 'ladybug', matchCount: 0, nodes: [], edges: [], error: `could not load graph: ${error.message}` };
-    }
-    const source = loaded.source;
+function connectEdge(edge, relatedIds) {
+    if (String(edge.type).toLowerCase() === 'imports') return;
+    if (relatedIds.has(edge.from)) relatedIds.add(edge.to);
+    if (relatedIds.has(edge.to)) relatedIds.add(edge.from);
+}
+
+function expandRelatedEdges(edges, relatedIds) {
+    edges.forEach(edge => connectEdge(edge, relatedIds));
+}
+
+function resolveChunkId(node) {
+    return node.startsWith('chunk:') ? node : `chunk:${node}`;
+}
+
+function findNodeInGraph(graph, node) {
+    const direct = graph.getNode(node);
+    if (direct) return direct.id;
+    const chunk = graph.getNode(resolveChunkId(node));
+    if (chunk) return chunk.id;
+    const resolved = resolveCodeFile(graph, node).node;
+    if (resolved) return resolved.id;
+    return node;
+}
+
+function resolveStartNode(graph, node) {
+    const candidate = findNodeInGraph(graph, node);
+    const stored = graph.getNode(candidate);
+    return stored ? stored.id : candidate;
+}
+
+function isImportSpec(spec) {
+    if (!spec || typeof spec !== 'object') return false;
+    return isImportEdgeType(spec.type);
+}
+
+function asImportType(spec) {
+    if (isImportSpec(spec)) return { ...spec, type: IMPORT_EDGE };
+    return spec;
+}
+
+function isImportQuery(incoming, outgoing) {
+    return isImportSpec(incoming) || isImportSpec(outgoing);
+}
+
+function executeNodeQuery(graph, args, startNode) {
+    const { incoming, outgoing, path: traversalPath, maxDepth, incomingDepth, outgoingDepth, filter, limit = 10, minWeight = 0 } = args;
+    const effectiveLimit = isImportQuery(incoming, outgoing) ? Math.max(limit, IMPORT_QUERY_LIMIT) : limit;
+    return queryGraph(graph, {
+        node: startNode, outgoing: asImportType(outgoing), incoming: asImportType(incoming),
+        path: traversalPath, maxDepth, incomingDepth, outgoingDepth, filter,
+        limit: effectiveLimit, minWeight
+    });
+}
+
+function executeDocTextQuery(graph, text, directMatches, limit) {
+    const matches = rankDocuments(graph, text, directMatches, { readFile: readRepoFile, limit });
+    const edges = graph.edges.filter(edge => matches.some(match => match.id === edge.from || match.id === edge.to));
+    return { nodes: matches, edges };
+}
+
+function executeGeneralTextQuery(graph, directMatches, limit, kind) {
+    const relatedIds = new Set(directMatches.map(match => match.id));
+    expandRelatedEdges(graph.edges, relatedIds);
+    // the related neighbours (a doc next to a code file) obey the kind filter too
+    const matches = Array.from(relatedIds).map(id => graph.getNode(id)).filter(node => node && nodeMatchesKind(node, kind)).slice(0, limit);
+    const edges = graph.edges.filter(edge => matches.some(match => match.id === edge.from || match.id === edge.to));
+    return { nodes: matches, edges };
+}
+
+async function executeTextQuery(graph, text, args) {
+    const limit = args.limit || 10;
+    const context = await buildContextFromGraph(graph, text, { limit });
+    const directMatches = rankGraphNodes(graph, text, { limit, kind: args.kind }).map(e => e.node);
+    const result = args.kind === 'doc'
+        ? executeDocTextQuery(graph, text, directMatches, limit)
+        : executeGeneralTextQuery(graph, directMatches, limit, args.kind);
+    return { context, result };
+}
+
+function buildImpactMap(graph, nodes, isNodeMode, startNode) {
+    const candidates = isNodeMode ? nodes.filter(match => match.id === startNode) : nodes;
+    const codeFiles = candidates.filter(match => match.type === 'CodeFile' && match.kind !== 'test').map(match => match.path);
+    return fileImpact(graph, codeFiles, { readFile: readRepoFile, coverage: loadCoverage().coverage });
+}
+
+function decorateMatch(match, impact) {
+    return {
+        ...answerNode(match),
+        ...impact.get(match.path),
+        ...(match.mentions ? { mentions: match.mentions } : {}),
+        ...(match.lines ? { lines: match.lines } : {})
+    };
+}
+
+function buildHopInfo(result) {
+    if (result.total === undefined) return {};
+    const hint = result.truncated ? `${result.total} neighbours, ${result.nodes.length - 1} shown: raise limit, or ask one edge type (incoming: { type: 'IMPORTS' })` : undefined;
+    return {
+        total: result.total,
+        truncated: result.truncated,
+        ...(hint ? { hint } : {})
+    };
+}
+
+function buildMissingResponse(loaded, sessionId) {
     const freshness = freshnessFor(loaded.graph);
-    if (loaded.missing) {
-        return {
-            available: true, sessionId, source, matchCount: 0, nodes: [], edges: [], context: '', freshness,
-            provenance: { source, sessionId, totalNodes: 0, totalEdges: 0, matchCount: 0, freshness, scopes: loaded.scopes }
-        };
+    return {
+        available: true, sessionId, source: loaded.source, matchCount: 0, nodes: [], edges: [], context: '', freshness,
+        provenance: { source: loaded.source, sessionId, totalNodes: 0, totalEdges: 0, matchCount: 0, freshness, scopes: loaded.scopes }
+    };
+}
+
+function shouldIncludeProject(projectGraph) {
+    if (projectGraph === false) return false;
+    return isProjectGraphEnabled();
+}
+
+function loadModel(args, sessionId) {
+    return loadGraphModel({
+        sessionId, text: args.query,
+        includeProject: shouldIncludeProject(args.projectGraph),
+        includeDocs: args.includeDocs || args.kind === 'doc',
+        history: args.history === true
+    });
+}
+
+async function tryLoadModel(args, sessionId) {
+    try {
+        return await loadModel(args, sessionId);
+    } catch (error) {
+        return { error: `could not load graph: ${error.message}` };
     }
-    let result;
-    let context = '';
+}
+
+function buildQueryResponse(loaded, args, sessionId, queryResult, startNode) {
+    const { graph, source } = loaded;
+    const { result, context } = queryResult;
+    const freshness = freshnessFor(graph);
+    const provenance = { source, sessionId, totalNodes: graph.nodes.size, totalEdges: graph.edges.length, matchCount: result.nodes.length, freshness, scopes: loaded.scopes };
+    const symbols = locateSymbols([...graph.nodes.values()], args.query ?? args.node);
+    const impact = buildImpactMap(graph, result.nodes, Boolean(args.node), startNode);
+    const nodes = result.nodes.map(match => decorateMatch(match, impact));
+    const hop = buildHopInfo(result);
+    return { available: true, sessionId, source, matchCount: result.nodes.length, nodes, edges: result.edges, ...hop, symbols, context, freshness, provenance };
+}
+
+async function runQueryWorkflow(loaded, args, sessionId) {
+    const { graph } = loaded;
+    let queryResult;
     let startNode;
-    if (node) {
-        const asImportType = (spec) => (spec && typeof spec === 'object' && isImportEdgeType(spec.type) ? { ...spec, type: IMPORT_EDGE } : spec);
-        const importQuery = [incoming, outgoing].some(spec => spec && typeof spec === 'object' && isImportEdgeType(spec.type));
-        const chunkId = node.startsWith('chunk:') ? node : `chunk:${node}`;
-        startNode = loaded.graph.getNode(node)
-            ? node
-            : (loaded.graph.getNode(chunkId) ? chunkId : (resolveCodeFile(loaded.graph, node).node?.id ?? node));
-        // ids are stored in lower case and getNode ignores case: compare with the stored id, not with what was asked
-        startNode = loaded.graph.getNode(startNode)?.id ?? startNode;
+    if (args.node) {
+        startNode = resolveStartNode(graph, args.node);
         try {
-            result = queryGraph(loaded.graph, {
-                node: startNode, outgoing: asImportType(outgoing), incoming: asImportType(incoming), path: traversalPath, maxDepth, incomingDepth, outgoingDepth, filter,
-                limit: importQuery ? Math.max(limit, IMPORT_QUERY_LIMIT) : limit, minWeight
-            });
+            queryResult = { context: '', result: executeNodeQuery(graph, args, startNode) };
         } catch (error) {
             return { error: `invalid graph query: ${error.message}` };
         }
     } else {
-        context = await buildContextFromGraph(loaded.graph, text, { limit });
-        const directMatches = rankGraphNodes(loaded.graph, text, { limit, kind: args.kind }).map(e => e.node);
-        const relatedIds = new Set(directMatches.map(match => match.id));
-        for (const edge of args.kind === 'doc' ? [] : loaded.graph.edges) {
-            if (String(edge.type).toLowerCase() === 'imports') continue;
-            if (relatedIds.has(edge.from)) relatedIds.add(edge.to);
-            if (relatedIds.has(edge.to)) relatedIds.add(edge.from);
-        }
-        const matches = args.kind === 'doc'
-            ? rankDocuments(loaded.graph, text, directMatches, { readFile: readRepoFile, limit })
-            : Array.from(relatedIds).map(id => loaded.graph.getNode(id)).filter(Boolean).slice(0, limit);
-        result = { nodes: matches, edges: loaded.graph.edges.filter(edge => matches.some(match => match.id === edge.from || match.id === edge.to)) };
+        queryResult = await executeTextQuery(graph, args.query, args);
     }
-    const provenance = { source, sessionId, totalNodes: loaded.graph.nodes.size, totalEdges: loaded.graph.edges.length, matchCount: result.nodes.length, freshness, scopes: loaded.scopes };
-    const symbols = locateSymbols([...loaded.graph.nodes.values()], text ?? node);
-    // node mode: the consequences and risks of the start node, as query mode gives them (only the start: its neighbours are the edges)
-    const impactOf = node ? result.nodes.filter(match => match.id === startNode) : result.nodes;
-    const impact = fileImpact(loaded.graph, impactOf.filter(match => match.type === 'CodeFile' && match.kind !== 'test').map(match => match.path), { readFile: readRepoFile, coverage: loadCoverage().coverage });
-    const nodes = result.nodes.map(match => ({ ...answerNode(match), ...impact.get(match.path), ...(match.mentions ? { mentions: match.mentions } : {}), ...(match.lines ? { lines: match.lines } : {}) }));
-    const hop = result.total === undefined ? {} : { total: result.total, truncated: result.truncated, ...(result.truncated ? { hint: `${result.total} neighbours, ${result.nodes.length - 1} shown: raise limit, or ask one edge type (incoming: { type: 'IMPORTS' })` } : {}) };
-    return { available: true, sessionId, source, matchCount: result.nodes.length, nodes, edges: result.edges, ...hop, symbols, context, freshness, provenance };
+    return buildQueryResponse(loaded, args, sessionId, queryResult, startNode);
+}
+
+export async function graph_query(rawArgs) {
+    const { args, sessionId } = normalizeQueryArgs(rawArgs);
+    const validationError = validateQueryArgs(args, sessionId);
+    if (validationError) return { error: validationError };
+
+    const loaded = await tryLoadModel(args, sessionId);
+    if (loaded.error) {
+        return { available: false, sessionId, source: 'ladybug', matchCount: 0, nodes: [], edges: [], error: loaded.error };
+    }
+    if (loaded.missing) return buildMissingResponse(loaded, sessionId);
+
+    return runQueryWorkflow(loaded, args, sessionId);
 }

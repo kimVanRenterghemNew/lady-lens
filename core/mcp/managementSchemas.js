@@ -5,6 +5,7 @@
  */
 
 import { RESEARCH_TOOL_SCHEMAS } from '../search/index.js';
+import { MENDIX_SCHEMAS } from './mendixSchemas.js';
 
 const REPO_PARAM = {
     type: 'string',
@@ -83,6 +84,7 @@ export const REPO_MANAGEMENT_SCHEMAS = [
             required: ['change', 'against']
         }
     },
+    ...MENDIX_SCHEMAS,
     {
         name: 'cross_repo_search',
         description: 'Search text or a symbol in several registered projects at once: every project, or only `repos`. Matches per project (file, line, definition/call/reference); names that are not registered come back in `unknown`.',

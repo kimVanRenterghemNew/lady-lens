@@ -150,7 +150,7 @@ core/
     toolRoutes.js            # lijst { name, handle } en callTool
     server.js httpServer.js streamableHttp.js daemon.js
   language/ eval/ observability/
-ui/                          # dashboard, volgt ?repo=
+ui/                          # dashboard, volgt ?repo=; stacktrace-tab via POST /api/trace (core/search/stackTrace.js); context onder de code via GET /api/at, /api/flow (callFlow) en /api/history (codeHistory, via de GitPort); één plek voor alle tabs in de URL-hash (graph-ui-nav.html); delen van de pagina in graph-ui-*.html
 test/
   ports/                     # contracttests per poort
   codeStructure.test.js moduleApi.test.js performance.test.js

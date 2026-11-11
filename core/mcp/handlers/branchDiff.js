@@ -1,4 +1,5 @@
 import { branchDiff as diffBranches, branchImpact as impactOfBranch, commitShow as showCommit, functionHistory as historyOfFunction } from '../../branches/index.js';
+import { mendixDiff as diffMendix } from '../../mendix/index.js';
 import { REPO_ROOT } from '../../configuration/index.js';
 
 const rootOf = () => process.env.LENS_REPO_ROOT || REPO_ROOT;
@@ -21,4 +22,9 @@ export function commitShow({ commit } = {}) {
 /** Commits that added, modified or removed one function of one file. */
 export function functionHistory({ name, file, ref, max } = {}) {
     return historyOfFunction({ name, file, ref, max, root: rootOf() });
+}
+
+/** The Mendix model changes `to` brings since its merge-base with `from`: documents, elements, properties, flow graphs. */
+export function mendixDiff({ from, to } = {}) {
+    return diffMendix({ from, to, root: rootOf() });
 }

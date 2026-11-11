@@ -12,7 +12,7 @@ export {
     createMcpDashboardHtml
 } from './httpServer.js';
 export { handleStreamableHttpRequest } from './streamableHttp.js';
-export { agentTargets, skillTargets, serverEntry, runAgentInstall, runSkillInstall, formatAgentInstall, agentInstallCommand } from './agentInstall.js';
+export { agentTargets, skillTargets, serverEntry, runAgentInstall, runSkillInstall, runRefresh, formatAgentInstall, agentInstallCommand } from './agentInstall.js';
 export {
     DAEMON_FILE,
     writeDaemonInfo,

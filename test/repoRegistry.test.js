@@ -13,7 +13,7 @@ import {
 
 describe('repository registry', () => {
     it('registers, lists and unregisters repositories', () => {
-        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-reg-test-'));
+        const tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'lens-reg-test-'))); // the long path (os.tmpdir() can be 8.3)
         const regFile = path.join(tmpDir, 'repos.json');
 
         const repoA = path.join(tmpDir, 'repoA');
@@ -56,5 +56,24 @@ describe('repository registry', () => {
         expect(currentGitBranch(tmpDir)).toBe('feature-branch');
 
         fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    // Kura (2026-11-11): `lens add` from the 8.3 short path (KIM~1.VAN) and `lens sync` from the long path made two repos
+    it('a Windows 8.3 short path and the long path of one folder are the same repo', () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-reg-short-'));
+        const regFile = path.join(tmpDir, 'repos.json');
+        const repo = path.join(tmpDir, 'repo');
+        fs.mkdirSync(repo);
+        const long = fs.realpathSync.native(repo);
+        try {
+            if (!repo.includes('~')) return; // no 8.3 name in the temp folder (Linux, macOS, 8.3 names off): nothing to compare
+            expect(idOfRepo(repo)).toBe(idOfRepo(long));
+            registerRepo(repo, {}, regFile);
+            registerRepo(long, {}, regFile);
+            expect(listRegisteredRepos(regFile).map(entry => entry.path)).toEqual([long]);
+            expect(resolveRepoTarget(repo, regFile).path).toBe(long);
+        } finally {
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
     });
 });

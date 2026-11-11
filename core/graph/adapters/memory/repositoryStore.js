@@ -24,6 +24,29 @@ function toRow(entity) {
     return row;
 }
 
+const asFilterSet = list => Array.isArray(list) && list.length > 0 ? new Set(list) : null;
+const matchesScopePrefix = (r, prefix) => !prefix || String(r.scope || '').startsWith(prefix);
+const matchesId = (r, idSet) => !idSet || idSet.has(r.id);
+const matchesType = (r, typeSet) => !typeSet || typeSet.has(r.type);
+
+function matchNodeSecondary(r, prefix, idSet, typeSet) {
+    return matchesScopePrefix(r, prefix) && matchesId(r, idSet) && matchesType(r, typeSet);
+}
+
+function createNodePredicate(filters = {}) {
+    const kindSet = asFilterSet(filters.kinds);
+    const scopeSet = asFilterSet(filters.scopes);
+    const idSet = asFilterSet(filters.ids);
+    const typeSet = asFilterSet(filters.types);
+    const prefix = filters.scopePrefix;
+
+    return function matchNode(r) {
+        if (kindSet && !kindSet.has(r.kind)) return false;
+        if (scopeSet && !scopeSet.has(r.scope)) return false;
+        return matchNodeSecondary(r, prefix, idSet, typeSet);
+    };
+}
+
 export function createMemoryRepositoryStore() {
     const nodes = new Map(); // id -> row
     const edges = new Map(); // `${from}\u0000${to}\u0000${relation}` -> edge row
@@ -36,23 +59,25 @@ export function createMemoryRepositoryStore() {
     };
     const relate = (relations) => {
         for (const r of relations) {
-            if (!nodes.has(r.from) || !nodes.has(r.to)) continue; // as Ladybug's MATCH: missing endpoints are skipped
-            edges.set(`${r.from}\u0000${r.to}\u0000${r.relation}`, {
-                from_id: r.from, to_id: r.to, relation: r.relation, confidence: normalizeConfidence(r.confidence),
-                weight: Number(r.weight ?? 1), created_at: String(r.createdAt ?? ''), updated_at: String(r.updatedAt ?? r.createdAt ?? '')
-            });
+            if (nodes.has(r.from) && nodes.has(r.to)) {
+                edges.set(`${r.from}\u0000${r.to}\u0000${r.relation}`, {
+                    from_id: r.from, to_id: r.to, relation: r.relation, confidence: normalizeConfidence(r.confidence),
+                    weight: Number(r.weight ?? 1), created_at: String(r.createdAt ?? ''), updated_at: String(r.updatedAt ?? r.createdAt ?? '')
+                });
+            }
         }
         written = true;
     };
+    function detachEdgesFor(id) {
+        for (const [key, edge] of edges) if (edge.from_id === id || edge.to_id === id) edges.delete(key);
+    }
     const detachDelete = (predicate) => {
-        let count = 0;
-        for (const [id, row] of nodes) {
-            if (!predicate(row)) continue;
+        const toDelete = [...nodes.entries()].filter(([, row]) => predicate(row));
+        for (const [id] of toDelete) {
             nodes.delete(id);
-            count++;
-            for (const [key, edge] of edges) if (edge.from_id === id || edge.to_id === id) edges.delete(key);
+            detachEdgesFor(id);
         }
-        return count;
+        return toDelete.length;
     };
     const scopeOf = (id) => nodes.get(id)?.scope;
     const deleteEdges = (predicate) => { for (const [key, edge] of edges) if (predicate(edge)) edges.delete(key); };
@@ -102,13 +127,9 @@ export function createMemoryRepositoryStore() {
             return upsert(list.map(node => ({ ...node, scope })));
         },
 
-        async loadNodes({ kinds, scopePrefix, scopes, ids, types } = {}) {
+        async loadNodes(filter = {}) {
             if (!written) return [];
-            return [...nodes.values()].filter(r => (!kinds?.length || kinds.includes(r.kind))
-                && (!scopes?.length || scopes.includes(r.scope))
-                && (!scopePrefix || String(r.scope ?? '').startsWith(scopePrefix))
-                && (!ids?.length || ids.includes(r.id))
-                && (!types?.length || types.includes(r.type))).map(rowToStoredNode);
+            return [...nodes.values()].filter(createNodePredicate(filter)).map(rowToStoredNode);
         },
 
         async relate(relations = [], { replaceFrom = [] } = {}) {

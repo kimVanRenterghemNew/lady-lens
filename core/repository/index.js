@@ -4,6 +4,7 @@ export {
     LENS_HOME,
     REGISTRY_FILE,
     idOfRepo,
+    canonicalRepoPath,
     databasePathOfRepo,
     readRegistry,
     writeRegistry,

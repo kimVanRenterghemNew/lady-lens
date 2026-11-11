@@ -21,9 +21,7 @@ export function getRepoChurn(root, history = commitFiles) {
     const churn = new Map();
     try {
         for (const files of history(root)) {
-            for (const path of new Set(files)) {
-                churn.set(path, (churn.get(path) || 0) + 1);
-            }
+            new Set(files).forEach(path => churn.set(path, (churn.get(path) || 0) + 1));
         }
     } catch {
         // git failed or not available
@@ -60,6 +58,7 @@ export async function healthTool(args = {}, { refresh = refreshProjectGraph, his
         topCentralNodes: report.topCentralNodes || [],
         zoneOfPain: report.zoneOfPain || [],
         complexFunctions: (report.complexFunctions || []).slice(0, max),
+        designSmells: report.designSmells.slice(0, max),
         ...hubsAndBridges(loaded.graph, { hubs, bridges, limit: max }),
         truncated: report.files.length > max,
         source: loaded.source,

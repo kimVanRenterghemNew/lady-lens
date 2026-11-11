@@ -1,12 +1,11 @@
 /**
- * Source facts for the code graph: exports, declared names at any depth,
- * slash commands, relative imports, calls to declared or imported functions and a one-paragraph purpose. One parser for every producer,
- * so the indexer and the eval can never disagree about what a file "contains".
- *
+ * Source facts for the code graph: exports, declared names, slash commands, relative imports,
+ * calls to declared/imported functions, purpose, and file smells.
  * @module core/graph/codeFacts
  */
 import { parse } from 'acorn';
-import { extractFunctionComplexities } from './functionComplexity.js';
+import { extractFunctionComplexities, extractCallbackComplexities } from './functionComplexity.js';
+import { detectFileSmells } from './fileSmells.js';
 
 const MAX_PURPOSE_CHARS = 240;
 const MAX_DEEP_SYMBOLS = 120;
@@ -15,24 +14,18 @@ const NOISY_NAMES = new Set(['result', 'results', 'error', 'value', 'values', 'i
 export const TEST_FILE = /\.(test|spec|ablation)\.[cm]?js$|(^|\/)test\/|\.(?:Unit)?Tests\b/i;
 
 /** Where scripts live unless a repository says more (`project.script_paths` in its settings). */
-export const DEFAULT_SCRIPT_PATHS = ['scripts/**', 'bin/**'];
+export const DEFAULT_SCRIPT_PATHS = ['scripts/**', 'bin/**', '**.config.*'];   // x.config.js: run by its tool, not imported
 
 /** `dir/**` and `dir/*.mjs` style patterns, repo-relative, forward slashes. */
 const globRegex = (pattern) => new RegExp(`^${String(pattern).split('**').map(part => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')).join('.*')}$`);
 
 /** `test`, `script` or `source`: tests only compare with / boost for test questions; scripts are run, not imported. */
-export function fileKindOf(relativePath, { scriptPaths = DEFAULT_SCRIPT_PATHS } = {}) {
-    if (TEST_FILE.test(relativePath)) return 'test';
-    if (scriptPaths.some(pattern => globRegex(pattern).test(relativePath))) return 'script';
-    return 'source';
-}
+export const fileKindOf = (relativePath, { scriptPaths = DEFAULT_SCRIPT_PATHS } = {}) => (
+    TEST_FILE.test(relativePath) ? 'test' : scriptPaths.some(pattern => globRegex(pattern).test(relativePath)) ? 'script' : 'source'
+);
 
 /** Config files the code names in a string (`'configs/models.yaml'`, `"package.json"`): their file names, once each. */
-export function configFilesNamed(source) {
-    const names = new Set();
-    for (const match of String(source).matchAll(/['"`]([^'"`\s]*?([\w.-]+\.(?:ya?ml|json)))['"`]/g)) names.add(match[2]);
-    return [...names].sort();
-}
+export const configFilesNamed = (source) => [...new Set([...String(source).matchAll(/['"`]([^'"`\s]*?([\w.-]+\.(?:ya?ml|json)))['"`]/g)].map(m => m[2]))].sort();
 
 export function extractPurpose(raw) {
     // `.` does not match `\r`: with CRLF line endings a `//` header was never seen
@@ -51,23 +44,22 @@ export function extractPurpose(raw) {
 function declaredNames(declaration) {
     if (!declaration) return [];
     if (declaration.id?.name) return [declaration.id.name];
-    if (declaration.type === 'VariableDeclaration') return declaration.declarations.flatMap(item => (item.id?.type === 'Identifier' ? [item.id.name] : []));
-    return [];
+    return declaration.type === 'VariableDeclaration' ? declaration.declarations.flatMap(item => (item.id?.type === 'Identifier' ? [item.id.name] : [])) : [];
 }
 
-/**
- * A method (`async recoverInterrupted() {}` in a class or object literal) or a property holding a function
- * (`retryRound: () => 1`). The public API of a factory such as createWorkQueue() is exactly these members; plain data
- * properties and `constructor` are not behaviour names.
- */
 function isFunctionMember(node) {
     if (node.computed || node.key?.type !== 'Identifier' || node.key.name === 'constructor') return false;
-    if (node.type === 'MethodDefinition') return true;
-    if (node.type !== 'Property') return false;
-    return node.method === true || ['FunctionExpression', 'ArrowFunctionExpression'].includes(node.value?.type);
+    return node.type === 'MethodDefinition' || (node.type === 'Property' && (node.method === true || ['FunctionExpression', 'ArrowFunctionExpression'].includes(node.value?.type)));
 }
 
 const MAX_SYMBOL_RANGES = 200;
+
+function forChildren(node, fn) {
+    for (const key of Object.keys(node).filter(k => k !== 'loc')) {
+        const items = Array.isArray(node[key]) ? node[key] : [node[key]];
+        items.forEach(item => { if (item?.type) fn(item); });
+    }
+}
 
 /** 1-based [startLine, endLine] of every declared name (first declaration wins), for `graph_query`'s symbol -> lines answer. */
 function collectSymbolRanges(ast) {
@@ -79,14 +71,9 @@ function collectSymbolRanges(ast) {
     const visit = (node, owner = node) => {
         if (!node || typeof node.type !== 'string') return;
         if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') && node.id?.name) put(node.id.name, owner === node ? node : owner);
-        else if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') put(node.id.name, node.init ? node : node);
-        else if (isFunctionMember(node)) put(node.key.name, node);
-        for (const key of Object.keys(node)) {
-            if (key === 'loc') continue;
-            const child = node[key];
-            if (Array.isArray(child)) child.forEach(item => visit(item));
-            else if (child && typeof child.type === 'string') visit(child);
-        }
+        if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') put(node.id.name, node);
+        if (isFunctionMember(node)) put(node.key.name, node);
+        forChildren(node, visit);
     };
     visit(ast);
     return ranges;
@@ -98,13 +85,9 @@ function collectDeclaredNames(ast) {
     const visit = (node) => {
         if (!node || typeof node.type !== 'string' || names.size >= MAX_DEEP_SYMBOLS) return;
         if ((node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') && node.id?.name) names.add(node.id.name);
-        else if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') names.add(node.id.name);
-        else if (isFunctionMember(node)) names.add(node.key.name);
-        for (const key of Object.keys(node)) {
-            const child = node[key];
-            if (Array.isArray(child)) child.forEach(visit);
-            else if (child && typeof child.type === 'string') visit(child);
-        }
+        if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier') names.add(node.id.name);
+        if (isFunctionMember(node)) names.add(node.key.name);
+        forChildren(node, visit);
     };
     visit(ast);
     return [...names].filter(name => name.length >= 4 && !NOISY_NAMES.has(name.toLowerCase()));
@@ -112,31 +95,47 @@ function collectDeclaredNames(ast) {
 
 const MAX_CALLS = 500;
 
+const IMPORT_SPECIFIERS = {
+    ImportSpecifier: (spec, specifier) => ({ name: spec.imported.name ?? spec.imported.value, specifier }),
+    ImportDefaultSpecifier: (_spec, specifier) => ({ name: 'default', specifier }),
+    ImportNamespaceSpecifier: (_spec, specifier) => ({ namespace: true, specifier })
+};
+
 /** Local name -> what it imports from a relative module: `{ name, specifier }`, or `{ namespace: true, specifier }` for `* as ns`. */
 function relativeImportNames(ast) {
     const names = new Map();
-    for (const node of ast.body) {
-        if (node.type !== 'ImportDeclaration' || !String(node.source.value).startsWith('.')) continue;
+    const importDecls = ast.body.filter(n => n.type === 'ImportDeclaration' && String(n.source.value).startsWith('.'));
+    for (const node of importDecls) {
         const specifier = node.source.value;
-        for (const spec of node.specifiers) {
-            if (spec.type === 'ImportSpecifier') names.set(spec.local.name, { name: spec.imported.name ?? spec.imported.value, specifier });
-            else if (spec.type === 'ImportDefaultSpecifier') names.set(spec.local.name, { name: 'default', specifier });
-            else if (spec.type === 'ImportNamespaceSpecifier') names.set(spec.local.name, { namespace: true, specifier });
-        }
+        node.specifiers.forEach(spec => {
+            const entry = IMPORT_SPECIFIERS[spec.type]?.(spec, specifier);
+            if (entry) names.set(spec.local.name, entry);
+        });
     }
     return names;
 }
 
+const CALLEE_RESOLVERS = {
+    Identifier: (c, imported, declared) => {
+        const via = imported.get(c.name);
+        if (via && !via.namespace) return { name: via.name, specifier: via.specifier };
+        return (!via && declared.has(c.name)) ? { name: c.name } : null;
+    },
+    MemberExpression: (c, imported) => {
+        if (c.computed || c.object.type !== 'Identifier') return null;
+        const obj = imported.get(c.object.name);
+        return obj?.namespace ? { name: c.property.name, specifier: obj.specifier } : null;
+    }
+};
+
+const resolveCallTarget = (callee, imported, declared) => CALLEE_RESOLVERS[callee.type]?.(callee, imported, declared) || null;
+
 /**
  * Every call to a function this file declares or imports from a relative module: `[caller, callee, line, specifier?]`.
- * `caller` is the innermost function around the call that the graph knows (has a symbol range; '' at module level); `callee` is the name as declared in
- * its own module (an alias is undone); `specifier` is absent for a function of this file. Method calls on objects are
- * left out: without types they cannot be resolved.
  */
 function collectCalls(ast, declared) {
     const imported = relativeImportNames(ast);
-    const calls = [];
-    const seen = new Set();
+    const calls = [], seen = new Set();
     const add = (entry) => {
         const key = entry.join('|');
         if (!seen.has(key) && calls.length < MAX_CALLS) { seen.add(key); calls.push(entry); }
@@ -144,42 +143,39 @@ function collectCalls(ast, declared) {
     const visit = (node, owner) => {
         if (!node || typeof node.type !== 'string' || calls.length >= MAX_CALLS) return;
         let inner = owner;
-        // Only names the graph knows own calls; a call inside a short local closure belongs to the function around it.
         if (node.type === 'FunctionDeclaration' && declared.has(node.id?.name)) inner = node.id.name;
-        else if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && declared.has(node.id.name) && /Function|Arrow/.test(node.init?.type || '')) inner = node.id.name;
-        else if (isFunctionMember(node) && declared.has(node.key.name)) inner = node.key.name;
+        if (node.type === 'VariableDeclarator' && node.id?.type === 'Identifier' && declared.has(node.id.name) && /Function|Arrow/.test(node.init?.type || '')) inner = node.id.name;
+        if (isFunctionMember(node) && declared.has(node.key.name)) inner = node.key.name;
         if (node.type === 'CallExpression' || node.type === 'NewExpression') {
-            const callee = node.callee;
-            const line = node.loc.start.line;
-            if (callee.type === 'Identifier') {
-                const via = imported.get(callee.name);
-                if (via && !via.namespace) add([owner, via.name, line, via.specifier]);
-                else if (!via && declared.has(callee.name)) add([owner, callee.name, line]);
-            } else if (callee.type === 'MemberExpression' && !callee.computed && callee.object.type === 'Identifier' && imported.get(callee.object.name)?.namespace) {
-                add([owner, callee.property.name, line, imported.get(callee.object.name).specifier]);
-            }
+            const target = resolveCallTarget(node.callee, imported, declared);
+            if (target) add(target.specifier ? [owner, target.name, node.loc.start.line, target.specifier] : [owner, target.name, node.loc.start.line]);
         }
-        for (const key of Object.keys(node)) {
-            if (key === 'loc') continue;
-            const child = node[key];
-            if (Array.isArray(child)) child.forEach(item => visit(item, inner));
-            else if (child && typeof child.type === 'string') visit(child, inner);
-        }
+        forChildren(node, item => visit(item, inner));
     };
     visit(ast, '');
     return calls;
 }
 
-/** Slash commands / CLI flags a file defines, e.g. `'/status'`, so "add a status command" finds the dispatcher. */
-function collectCommandKeywords(source) {
-    const found = new Set();
-    for (const match of source.matchAll(/['"`](\/[a-z][a-z-]{2,20})['"`]/g)) found.add(match[1]);
-    return [...found].slice(0, 40);
-}
+const collectCommandKeywords = (source) => [...new Set([...source.matchAll(/['"`](\/[a-z][a-z-]{2,20})['"`]/g)].map(m => m[1]))].slice(0, 40);
+
+const BODY_NODE_HANDLERS = {
+    ImportDeclaration: (node, res) => res.imports.push(node.source.value),
+    ExportAllDeclaration: (node, res) => res.imports.push(node.source.value),
+    ExportDefaultDeclaration: (_node, res) => res.exports.push('default'),
+    ExportNamedDeclaration: (node, res) => {
+        if (node.source) res.imports.push(node.source.value);
+        const names = [...declaredNames(node.declaration), ...node.specifiers.map(spec => spec.exported.name || spec.exported.value)];
+        res.exports.push(...names);
+        res.symbols.push(...names);
+    },
+    FunctionDeclaration: (node, res) => res.symbols.push(...declaredNames(node)),
+    ClassDeclaration: (node, res) => res.symbols.push(...declaredNames(node)),
+    VariableDeclaration: (node, res) => res.symbols.push(...declaredNames(node))
+};
 
 /** Parse one source file into the facts the graph needs. Never throws: a parse error becomes `parseError`. */
-export function analyzeSource(source) {
-    const result = { purpose: extractPurpose(source), exports: [], symbols: [], keywords: collectCommandKeywords(source), imports: [], symbolRanges: {}, calls: [], functions: [], parseError: null };
+export function analyzeSource(source, relativePath) {
+    const result = { purpose: extractPurpose(source), exports: [], symbols: [], keywords: collectCommandKeywords(source), imports: [], symbolRanges: {}, calls: [], functions: [], fileSmells: [], parseError: null };
     let ast;
     try {
         ast = parse(source, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true, locations: true });
@@ -190,26 +186,15 @@ export function analyzeSource(source) {
     }
 
     for (const node of ast.body) {
-        if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') result.imports.push(node.source.value);
-        else if (node.type === 'ExportNamedDeclaration') {
-            if (node.source) result.imports.push(node.source.value);
-            const names = [...declaredNames(node.declaration), ...node.specifiers.map(spec => spec.exported.name || spec.exported.value)];
-            result.exports.push(...names);
-            result.symbols.push(...names);
-        } else if (node.type === 'ExportDefaultDeclaration') {
-            result.exports.push('default');
-        } else if (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration' || node.type === 'VariableDeclaration') {
-            result.symbols.push(...declaredNames(node));
-        }
+        BODY_NODE_HANDLERS[node.type]?.(node, result);
     }
     for (const match of source.matchAll(/import\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) result.imports.push(match[1]);
-
     result.exports = [...new Set(result.exports)];
     result.symbols = [...new Set([...result.symbols, ...collectDeclaredNames(ast)])];
     result.imports = [...new Set(result.imports)].filter(specifier => specifier.startsWith('.'));
-    const ranges = collectSymbolRanges(ast);
-    result.symbolRanges = Object.fromEntries(Object.entries(ranges).filter(([name]) => result.symbols.includes(name)));
+    result.symbolRanges = Object.fromEntries(Object.entries(collectSymbolRanges(ast)).filter(([name]) => result.symbols.includes(name)));
     result.calls = collectCalls(ast, new Set(Object.keys(result.symbolRanges)));
-    result.functions = extractFunctionComplexities(ast);
+    [result.functions, result.callbacks] = [extractFunctionComplexities(ast), extractCallbackComplexities(ast)];
+    result.fileSmells = detectFileSmells(ast, relativePath, { exportsCount: result.exports.length, importsCount: result.imports.length });
     return result;
 }

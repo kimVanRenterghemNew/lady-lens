@@ -103,6 +103,14 @@ describe('diff_impact edges', () => {
         expect(changedFunctions({ from: 'one', to: 'two', git }).error).toContain('no common history');
         expect(changedFunctions({ git }).functions).toEqual([]);
     });
+
+    // MCP smoke test (2026-11-11): main..HEAD with 164 files ran a `git show` per file and side, which held the daemon minutes
+    it('reads the sources of a range and of the worktree in batches, never one git show per file', () => {
+        const fake = createFakeGit(state({ 'core/f.js': F1 }, [{ name: 'c2', parents: ['c1'], files: { 'core/f.js': F2, 'core/g.js': G } }]));
+        const git = { ...fake, readBlob: () => { throw new Error('readBlob per file'); } };
+        expect(changedFunctions({ from: fakeSha('c1'), to: 'main', git }).functions.map(fn => `${fn.change} ${fn.name}`)).toEqual(['modified f']);
+        expect(changedFunctions({ git, readFile: () => F1 }).functions.map(fn => `${fn.change} ${fn.name}`)).toEqual(['modified f']);
+    });
 });
 
 describe('changed lines to functions (AC2)', () => {

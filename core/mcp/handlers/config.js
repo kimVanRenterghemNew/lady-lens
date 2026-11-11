@@ -9,12 +9,13 @@ const hashOf = content => crypto.createHash('sha256').update(content).digest('he
 const escaped = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export function configGrep(args = {}) {
-    const result = grep(args, { root: REPO_ROOT });
+    // filter while searching: filtering afterwards lost every config match past the first page of code matches
+    const result = grep(args, { root: REPO_ROOT, acceptFile: isConfigFile });
     if (result.error) return result;
-    const matches = result.matches.filter(match => isConfigFile(match.file));
+    const matches = result.matches;
     return {
         matches,
-        totalCount: matches.length,
+        totalCount: result.totalCount,
         truncated: result.truncated,
         ...(result.offset === undefined ? {} : { offset: result.offset })
     };

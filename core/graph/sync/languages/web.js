@@ -65,6 +65,12 @@ export const CSS_CONFIG = Object.freeze({
     }
 });
 
+function addHtmlSymbol(result, name, line) {
+    result.symbols.push(name);
+    result.exports.push(name);
+    if (!result.symbolRanges[name]) result.symbolRanges[name] = [line, line];
+}
+
 export const HTML_CONFIG = Object.freeze({
     language: 'html',
     extensions: ['.html', '.htm'],
@@ -109,27 +115,13 @@ export const HTML_CONFIG = Object.freeze({
         // Key elements with id, custom web-components (<my-component>), templates (<template id="...">)
         const idPattern = /<(?:template|[a-z0-9-]+)[^>]+id=["']([A-Za-z0-9_-]+)["']/gi;
         for (const match of source.matchAll(idPattern)) {
-            const id = match[1];
-            if (id) {
-                const line = getLine(match.index);
-                result.symbols.push(`#${id}`);
-                result.exports.push(`#${id}`);
-                if (!result.symbolRanges[`#${id}`]) {
-                    result.symbolRanges[`#${id}`] = [line, line];
-                }
-            }
+            if (match[1]) addHtmlSymbol(result, `#${match[1]}`, getLine(match.index));
         }
 
         // Custom tags: <component-name ...>
         const customTagPattern = /<([a-z][a-z0-9]*-[-a-z0-9]+)\b/gi;
         for (const match of source.matchAll(customTagPattern)) {
-            const tag = match[1].toLowerCase();
-            result.symbols.push(tag);
-            result.exports.push(tag);
-            if (!result.symbolRanges[tag]) {
-                const line = getLine(match.index);
-                result.symbolRanges[tag] = [line, line];
-            }
+            addHtmlSymbol(result, match[1].toLowerCase(), getLine(match.index));
         }
 
         result.symbols = [...new Set(result.symbols)];

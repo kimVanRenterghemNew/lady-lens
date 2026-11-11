@@ -18,16 +18,21 @@ export function branchImpact({ change, against, root = process.cwd(), git = crea
     const againstFunctions = new Set(theirs.functions.flatMap(fn => [`${fn.file}\u0000${fn.name}`, ...(fn.oldName ? [`${fn.oldFile}\u0000${fn.oldName}`] : [])]));
     const againstFiles = new Set(theirs.files.flatMap(file => [file.path, file.oldPath].filter(Boolean)));
     const risks = [];
-    for (const fn of mine.functions.filter(entry => entry.change !== 'added')) {
-        // callers on `against` still use the old name of a renamed function
+    const touched = mine.functions.filter(entry => entry.change !== 'added');
+    // callers on `against` still use the old name of a renamed function; one batched grep, one log per file
+    const bareName = fn => (fn.oldName || fn.name).replace(/#\d+$/, '');
+    const hitsByName = git.grepRefs(against, [...new Set(touched.map(bareName))]);
+    const lastCommits = new Map();
+    const lastCommit = file => { if (!lastCommits.has(file)) lastCommits.set(file, git.lastCommitFor(base, change, file)); return lastCommits.get(file); };
+    for (const fn of touched) {
         const original = fn.oldName || fn.name;
         const originalFile = fn.oldFile || fn.file;
-        const references = git.grepRef(against, original.replace(/#\d+$/, '')).filter(hit => isCodeFile(hit.file));
+        const references = hitsByName.get(bareName(fn)).filter(hit => isCodeFile(hit.file));
         const overlap = againstFunctions.has(`${originalFile}\u0000${original}`);
         if (!references.length && !overlap) continue;
         risks.push({
             function: original, file: originalFile, change: fn.change, ...(fn.oldName ? { renamedTo: fn.name, renamedInFile: fn.file } : {}),
-            commit: git.lastCommitFor(base, change, fn.file), overlap,
+            commit: lastCommit(fn.file), overlap,
             references: references.slice(0, maxReferences).map(({ file, line }) => ({ file, line })),
             referenceCount: references.length
         });

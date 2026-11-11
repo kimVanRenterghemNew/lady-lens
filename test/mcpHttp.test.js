@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
-import { createMcpHttpServer, handleStreamableHttpRequest, MCP_SERVER_INFO } from '../core/mcp/index.js';
+import { createMcpHttpServer, createMcpDashboardHtml, handleStreamableHttpRequest, MCP_SERVER_INFO } from '../core/mcp/index.js';
 
 describe('MCP HTTP/SSE Server', () => {
+    it("status page: a tool description with $' or markup stays text and does not break the page", () => {
+        const html = createMcpDashboardHtml({ repo: 'C:/r&d', port: 4318, tools: [{ name: 'x', description: "costs $' and <b>more</b>" }] });
+        expect(html).toContain('costs $&#39; and &lt;b&gt;more&lt;/b&gt;');
+        expect(html).toContain('C:/r&amp;d');
+        expect(html).not.toMatch(/{{[A-Z_]+}}/);
+        expect(html.match(/<\/html>/gi)).toHaveLength(1);
+    });
+
     it('returns a JSON error when the Streamable HTTP server fails', async () => {
         const response = {
             headersSent: false,
@@ -48,12 +56,14 @@ describe('MCP HTTP/SSE Server', () => {
         }
     });
 
-    it('handles the accepted GET and DELETE methods on /mcp', async () => {
+    it('answers GET on /mcp with 405 (stateless: no event stream) and accepts DELETE', async () => {
         const mcpHttp = createMcpHttpServer({ defaultRepo: process.cwd(), port: 0 });
         const { port } = await mcpHttp.start(0);
         try {
             const headers = { Accept: 'application/json, text/event-stream' };
-            expect([200, 400]).toContain((await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'GET', headers })).status);
+            const get = await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'GET', headers });
+            expect(get.status).toBe(405);
+            expect(get.headers.get('allow')).toBe('POST, DELETE');
             expect([200, 400]).toContain((await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'DELETE', headers })).status);
         } finally {
             await mcpHttp.close();
@@ -134,6 +144,39 @@ describe('MCP HTTP/SSE Server', () => {
             expect(parsed.matches.length).toBeGreaterThan(0);
 
             await client.close();
+        } finally {
+            await mcpHttp.close();
+        }
+    });
+
+    it('covers HTTP endpoints: OPTIONS, /ui redirect, /status, invalid methods and 404', async () => {
+        const mcpHttp = createMcpHttpServer({ defaultRepo: process.cwd(), port: 0, uiPort: 54321 });
+        const { port } = await mcpHttp.start(0);
+        try {
+            const opt = await fetch(`http://127.0.0.1:${port}/mcp`, { method: 'OPTIONS' });
+            expect(opt.status).toBe(204);
+
+            const uiRes = await fetch(`http://127.0.0.1:${port}/ui`, { redirect: 'manual' });
+            expect(uiRes.status).toBe(302);
+            expect(uiRes.headers.get('location')).toBe('http://127.0.0.1:54321/');
+
+            const statusRes = await fetch(`http://127.0.0.1:${port}/status`);
+            expect(statusRes.status).toBe(200);
+
+            const badSse = await fetch(`http://127.0.0.1:${port}/sse`, { method: 'POST' });
+            expect(badSse.status).toBe(405);
+
+            const badMsg = await fetch(`http://127.0.0.1:${port}/messages`, { method: 'GET' });
+            expect(badMsg.status).toBe(405);
+
+            const missingSession = await fetch(`http://127.0.0.1:${port}/messages?sessionId=nonexistent`, { method: 'POST' });
+            expect(missingSession.status).toBe(404);
+
+            const noSession = await fetch(`http://127.0.0.1:${port}/messages`, { method: 'POST' });
+            expect(noSession.status).toBe(404);
+
+            const notFound = await fetch(`http://127.0.0.1:${port}/nonexistent-path`);
+            expect(notFound.status).toBe(404);
         } finally {
             await mcpHttp.close();
         }

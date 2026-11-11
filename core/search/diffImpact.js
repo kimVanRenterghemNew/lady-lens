@@ -4,12 +4,24 @@
  * test gaps, then most callers, then highest complexity.
  */
 import { REPO_ROOT } from '../configuration/index.js';
-import { createGraphRepository } from '../graph/index.js';
+import { createGraphRepository, createMemoryRepositoryStore, PROJECT_SCOPE } from '../graph/index.js';
 import { changedFunctions } from '../branches/index.js';
 import { refreshProjectGraph, readRepoFile } from './graphModelLoader.js';
 import { viewOf } from './functionView.js';
 
 const DEFAULT_LIMIT = 50;
+const MEMORY_VIEWS_FROM = 10;
+
+/**
+ * Many names: one load of the project graph and the views from memory. One Ladybug query per name took 53 s for the
+ * 872 names of a feature branch, and held the database for every other agent meanwhile (same answers, 4.9 s).
+ */
+async function viewSource(store, names) {
+    if (names.size <= MEMORY_VIEWS_FROM) return store;
+    const memory = createGraphRepository({ store: createMemoryRepositoryStore() });
+    await memory.replaceScope(PROJECT_SCOPE, await store.loadGraph({ scopes: [PROJECT_SCOPE] }));
+    return memory;
+}
 
 function impactEntry(fn, view) {
     const callers = view?.callers ?? [];
@@ -42,8 +54,10 @@ export async function diffImpact(args = {}, { refresh = refreshProjectGraph, git
     const store = repository ?? createGraphRepository();
     const max = Math.max(1, Math.min(Number(limit) || DEFAULT_LIMIT, 500));
     // one view per name (a repeated name `f#2` asks once); a removed function is no longer in the graph of the working copy
+    const names = new Set(changed.functions.map(fn => fn.name.replace(/#\d+$/, '')));
+    const viewStore = await viewSource(store, names);
     const views = new Map();
-    for (const name of new Set(changed.functions.map(fn => fn.name.replace(/#\d+$/, '')))) views.set(name, viewOf(store, name, { readFile }));
+    for (const name of names) views.set(name, viewOf(viewStore, name, { readFile }));
     const entries = [];
     for (const fn of changed.functions) entries.push(impactEntry(fn, await views.get(fn.name.replace(/#\d+$/, ''))));
     entries.sort(riskiestFirst);

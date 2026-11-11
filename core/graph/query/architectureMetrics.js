@@ -5,6 +5,14 @@
  * - Top Central Nodes: Structural core of the project (highest centrality & Ca)
  * - Zone of Pain: Highly stable/foundational nodes (I < 0.3) with complex functions or missing tests
  */
+import { isBarrelPath } from '../model/index.js';
+
+function computeIncomingSum(ins, ranks, outDegrees) {
+    if (!ins) return 0;
+    let sum = 0;
+    for (const from of ins) sum += ranks.get(from) / (outDegrees.get(from) || 1);
+    return sum;
+}
 
 function computePageRank(paths, outEdges, inEdges, iterations = 15, damping = 0.85) {
     const n = paths.length;
@@ -23,13 +31,7 @@ function computePageRank(paths, outEdges, inEdges, iterations = 15, damping = 0.
 
         const baseRank = (1 - damping) / n + damping * (sinkRankSum / n);
         for (const p of paths) {
-            let incomingSum = 0;
-            const ins = inEdges.get(p);
-            if (ins) {
-                for (const from of ins) {
-                    incomingSum += ranks.get(from) / (outDegrees.get(from) || 1);
-                }
-            }
+            const incomingSum = computeIncomingSum(inEdges.get(p), ranks, outDegrees);
             nextRanks.set(p, baseRank + damping * incomingSum);
         }
         ranks = nextRanks;
@@ -43,6 +45,50 @@ function computePageRank(paths, outEdges, inEdges, iterations = 15, damping = 0.
     }
     return normalized;
 }
+
+const HEAVY_ISSUES = new Set(['high-cyclomatic-complexity', 'large-function', 'too-many-params']);
+
+function isHeavyFunction(fn, maxCc) {
+    if (fn.cyclomaticComplexity > maxCc) return true;
+    if (!Array.isArray(fn.issues)) return false;
+    return fn.issues.some(i => HEAVY_ISSUES.has(i));
+}
+
+function isArchEdge(type) {
+    return type === 'IMPORTS' || type === 'CALLS';
+}
+
+function isValidEndpoint(from, to, allPathSet) {
+    if (!from || !to || from === to) return false;
+    return allPathSet.has(from) && allPathSet.has(to);
+}
+
+function recordArchEdge(edge, nodesById, allPathSet, outDep, inDep) {
+    if (!isArchEdge(edge.type)) return;
+    const from = nodesById.get(edge.from)?.path;
+    const to = nodesById.get(edge.to)?.path;
+    if (isValidEndpoint(from, to, allPathSet)) {
+        outDep.get(from).add(to);
+        inDep.get(to).add(from);
+    }
+}
+
+function nodeForPath(nodesByPath, path) {
+    return nodesByPath.get(path) || nodesByPath.get(path.toLowerCase()) || {};
+}
+
+function complexFunctionsForNode(node, path) {
+    const raw = Array.isArray(node.functions) ? node.functions : (node.metadata?.functions || []);
+    return raw
+        .filter(fn => (Array.isArray(fn.issues) && fn.issues.length) || (Array.isArray(fn.smells) && fn.smells.length))
+        .map(fn => ({ ...fn, file: path }));
+}
+
+function smellsForNode(node) {
+    return Array.isArray(node.fileSmells) ? node.fileSmells : (node.metadata?.fileSmells || []);
+}
+
+const maxCcOf = options => Number(options.maxCc ?? (process.env.LENS_MAX_CYCLOMATIC_COMPLEXITY || 15));
 
 export function calculateArchitectureMetrics(graph, fileEntries, options = {}) {
     const allCodeNodes = [...graph.nodes.values()].filter(node => node.type === 'CodeFile' && typeof node.path === 'string');
@@ -60,18 +106,12 @@ export function calculateArchitectureMetrics(graph, fileEntries, options = {}) {
     const outDep = new Map(allPaths.map(p => [p, new Set()]));
     const inDep = new Map(allPaths.map(p => [p, new Set()]));
 
-    for (const edge of graph.edges) {
-        if (edge.type !== 'IMPORTS' && edge.type !== 'CALLS') continue;
-        const from = nodesById.get(edge.from)?.path;
-        const to = nodesById.get(edge.to)?.path;
-        if (!from || !to || from === to || !allPathSet.has(from) || !allPathSet.has(to)) continue;
-        outDep.get(from).add(to);
-        inDep.get(to).add(from);
-    }
+    graph.edges.forEach(edge => recordArchEdge(edge, nodesById, allPathSet, outDep, inDep));
 
     const centrality = options.skipCentrality ? new Map() : computePageRank(allPaths, outDep, inDep);
     const allComplexFunctions = [];
-    const maxInstabilityForPain = Number(options.zoneOfPainInstability || process.env.LENS_ZONE_OF_PAIN_INSTABILITY || 0.3);
+    const maxInstabilityForPain = Number(options.zoneOfPainInstability ?? (process.env.LENS_ZONE_OF_PAIN_INSTABILITY || 0.3));
+    const maxCc = maxCcOf(options);
 
     for (const entry of fileEntries) {
         const ca = inDep.get(entry.path)?.size || 0;
@@ -85,17 +125,16 @@ export function calculateArchitectureMetrics(graph, fileEntries, options = {}) {
         entry.instability = instability;
         entry.centralityScore = score;
 
-        const node = nodesByPath.get(entry.path) || nodesByPath.get(entry.path.toLowerCase()) || {};
-        const functions = Array.isArray(node.functions) ? node.functions : [];
-        const fileComplexFns = functions
-            .filter(fn => Array.isArray(fn.issues) && fn.issues.length > 0)
-            .map(fn => ({ ...fn, file: entry.path }));
-
+        const node = nodeForPath(nodesByPath, entry.path);
+        const fileComplexFns = complexFunctionsForNode(node, entry.path);
+        entry.fileSmells = smellsForNode(node);
         entry.complexFunctions = fileComplexFns;
         allComplexFunctions.push(...fileComplexFns);
 
-        const isInZoneOfPain = instability < maxInstabilityForPain && ca > 0 &&
-            (fileComplexFns.length > 0 || !entry.tested || (entry.untestedExports && entry.untestedExports.length > 0));
+        // stable and depended on, and hard to change: heavy complex (CC > 15, large function, etc., but not norm CC 6-15) or not covered by tests. A barrel holds no code to change.
+        const hasHeavyFunction = fileComplexFns.some(fn => isHeavyFunction(fn, maxCc));
+        const isInZoneOfPain = instability < maxInstabilityForPain && ca > 0 && !isBarrelPath(entry.path) &&
+            (hasHeavyFunction || !entry.tested || entry.issues.includes('untested-exports') || entry.issues.includes('low-coverage'));
 
         if (isInZoneOfPain && !entry.issues.includes('zone-of-pain')) {
             entry.issues.push('zone-of-pain');

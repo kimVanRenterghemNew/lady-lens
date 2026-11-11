@@ -18,6 +18,8 @@ const calls = git => ({
     mergeBase: [git.mergeBase('main', 'feature'), git.mergeBase('feature', 'main'), git.mergeBase('main', 'nope')],
     diff: [byPath(git.diffNameStatus('main~2', 'main~1')), byPath(git.diffNameStatus('feature', 'main'))],
     readBlob: [git.readBlob('main', 'a.js'), git.readBlob('main', 'zzz.js'), git.readBlob('feature', 'c.js'), git.readBlob('nope', 'a.js')],
+    readBlobBytes: [git.readBlobBytes('main', 'a.js')?.toString('utf8'), git.readBlobBytes('main', 'zzz.js'), git.readBlobBytes('nope', 'a.js')],
+    commitList: [git.commitList('feature', 'main'), git.commitList('main', 'feature', { max: 1 }), git.commitList('main', 'nope')],
     logRange: [git.logRange('feature', 'main'), git.logRange('main', 'feature'), git.logRange('main', 'feature', { max: 1 }), git.logRange('main', 'nope')],
     countRange: [git.countRange('feature', 'main'), git.countRange('main', 'feature'), git.countRange('main', 'nope')],
     headInfo: git.headInfo(),
@@ -31,6 +33,8 @@ const calls = git => ({
     prefix: git.prefix(),
     changedSince: [git.changedSince('main~2', 'main'), git.changedSince('feature', 'main'), git.changedSince('main', 'nope')],
     grep: [git.grepRef('feature', 'f'), git.grepRef('feature', 'f', { max: 1 }), git.grepRef('main', 'nothing-here')],
+    grepRefs: [...git.grepRefs('feature', ['f', 'nothing-here', 'g'])], grepRefsMax: [...git.grepRefs('feature', ['f'], { max: 1 })],
+    blobsFromTop: [...git.readBlobs('feature', ['a.js', 'nope.js'], { fromTop: true })],
     lastCommitFor: [git.lastCommitFor('main~3', 'main', 'a.js'), git.lastCommitFor('main~3', 'main', 'docs/readme.md'), git.lastCommitFor('main', 'nope', 'a.js')],
     conflicts: [git.conflicts('main', 'feature'), git.conflicts('c3', 'feature'), git.conflicts('main', 'nope')]
 });
@@ -95,7 +99,7 @@ describe('git port contract', () => {
         const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-gitcontract-empty-'));
         try {
             const probe = git => [git.currentBranch(), git.resolveCommit('HEAD'), git.headInfo(), git.listBranches(), git.listTree('HEAD'), git.commitFiles(), git.changedSince('a', 'b'),
-                git.prefix(), git.grepRef('HEAD', 'x'), git.logRange('a', 'b'), git.countRange('a', 'b'), git.commitInfo('HEAD'), git.fileLog('HEAD', 'a.js'), git.conflicts('a', 'b'),
+                git.prefix(), git.grepRef('HEAD', 'x'), [...git.grepRefs('HEAD', ['x'])], git.logRange('a', 'b'), git.countRange('a', 'b'), git.commitInfo('HEAD'), git.fileLog('HEAD', 'a.js'), git.conflicts('a', 'b'),
                 git.readBlob('HEAD', 'a.js'), git.existsAt('HEAD', 'a.js'), [...git.readBlobs('HEAD', ['a.js'])], git.lastCommitFor('a', 'b', 'a.js'), git.mergeBase('a', 'b'), git.worktreeChanges(), git.ignoredPaths()];
             expect(probe(createFakeGit(null))).toEqual(probe(createGit({ root: empty })));
         } finally { fs.rmSync(empty, { recursive: true, force: true }); }

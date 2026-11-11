@@ -10,152 +10,178 @@ const isBarrel = (path) => /(^|\/)index\.[cm]?js$/.test(String(path));
 const isTest = (node) => node?.kind === 'test' || node?.type === 'Test';
 const TOP = 3;
 
+const pushMap = (map, key, val) => {
+    const list = map.get(key) || [];
+    if (!map.has(key)) map.set(key, list);
+    list.push(val);
+};
+
+function recordBarrelImport(edge, idToPath, barrelImporters) {
+    if (edge.type !== 'IMPORTS') return;
+    const from = idToPath.get(edge.from);
+    const to = idToPath.get(edge.to);
+    if (from && to && isBarrel(from)) {
+        pushMap(barrelImporters, to, from);
+    }
+}
+
+function expandBarrelQueue(cur, barrelImporters, reach, queue) {
+    const importers = barrelImporters.get(cur) || [];
+    importers.forEach(b => {
+        if (!reach.has(b)) {
+            reach.add(b);
+            queue.push(b);
+        }
+    });
+}
+
 /** `paths` plus every barrel that (transitively) imports one of them: what an importer may import to reach them. */
 export function barrelReach(graph, paths, idToPathMap = null) {
     const idToPath = idToPathMap || new Map([...graph.nodes.values()].map(node => [node.id, node.path]));
     const reach = new Set(paths);
     const barrelImporters = new Map();
-    for (const edge of graph.edges) {
-        if (edge.type !== 'IMPORTS') continue;
-        const from = idToPath.get(edge.from);
-        if (from && isBarrel(from)) {
-            const to = idToPath.get(edge.to);
-            if (to) {
-                let list = barrelImporters.get(to);
-                if (!list) { list = []; barrelImporters.set(to, list); }
-                list.push(from);
-            }
-        }
-    }
+    graph.edges.forEach(edge => recordBarrelImport(edge, idToPath, barrelImporters));
     const queue = [...paths];
     while (queue.length) {
-        const cur = queue.shift();
-        const importers = barrelImporters.get(cur);
-        if (importers) {
-            for (const b of importers) {
-                if (!reach.has(b)) {
-                    reach.add(b);
-                    queue.push(b);
-                }
-            }
-        }
+        expandBarrelQueue(queue.shift(), barrelImporters, reach, queue);
     }
     return reach;
 }
 
+const EDGE_COLLECTORS = {
+    DISCUSSES(edge, _from, to, { discussionsByPath }) {
+        if (to) pushMap(discussionsByPath, to, edge);
+    },
+    DISCUSSED_IN(edge, from, _to, { discussionsByPath }) {
+        if (from) pushMap(discussionsByPath, from, edge);
+    },
+    CALLS(edge, from, to, { callsByTo, byId }) {
+        if (from !== to && !isTest(byId.get(edge.from))) pushMap(callsByTo, to, edge);
+    },
+    CO_CHANGES(edge, from, to, { coChangesByPath }) {
+        if (from) pushMap(coChangesByPath, from, edge);
+        if (to) pushMap(coChangesByPath, to, edge);
+    },
+    IMPORTS(_edge, from, to, { directImportersByTo }) {
+        if (to && from) pushMap(directImportersByTo, to, from);
+    }
+};
+
+function collectOutsideImporters(reach, directImportersByTo) {
+    const importers = new Set();
+    for (const target of reach) {
+        const list = directImportersByTo.get(target) || [];
+        list.forEach(from => {
+            if (!reach.has(from)) importers.add(from);
+        });
+    }
+    return importers;
+}
+
+function compileExportRegex(exports) {
+    if (!exports.length) return null;
+    const escaped = exports.map(e => String(e).replace(/[$]/g, '\\$')).join('|');
+    return escaped ? new RegExp(`(^|[^\\w$])(?:${escaped})(?![\\w$])`) : null;
+}
+
+function resolveAffectedTests(entry, byPath, path, readCached) {
+    const rawExports = byPath.get(path)?.exports;
+    const exports = Array.isArray(rawExports) ? rawExports.filter(Boolean) : [];
+    const exportRegex = compileExportRegex(exports);
+    if (!exportRegex) return entry.tests;
+    return entry.tests.filter(test => exportRegex.test(readCached(test)));
+}
+
+function resolveLinkedDiscussions(discEdges, byId) {
+    const linked = discEdges.map(edge => {
+        const targetId = edge.from.startsWith('discussion:') ? edge.from : edge.to;
+        const discNode = byId.get(targetId);
+        return discNode ? (discNode.title || discNode.name || discNode.id) : targetId;
+    });
+    return [...new Set(linked)];
+}
+
+const coChangeOther = (edge, path, idToPath) =>
+    (idToPath.get(edge.from) === path ? idToPath.get(edge.to) : idToPath.get(edge.from));
+
+function buildConsequences(path, reach, context) {
+    const { idToPath, directImportersByTo, callsByTo, coChangesByPath, strongest } = context;
+    const importers = collectOutsideImporters(reach, directImportersByTo);
+    const calls = callsByTo.get(path) || [];
+    const together = coChangesByPath.get(path) || [];
+    return {
+        importedBy: importers.size,
+        calledBy: strongest(calls, edge => idToPath.get(edge.from)),
+        changesWith: strongest(together, edge => coChangeOther(edge, path, idToPath))
+    };
+}
+
+function computePathImpact(path, context) {
+    const entry = context.health.get(path);
+    if (!entry) return null;
+
+    const reach = barrelReach(context.graph, [path], context.idToPath);
+    const consequences = buildConsequences(path, reach, context);
+    const tests = resolveAffectedTests(entry, context.byPath, path, context.readCached);
+    consequences.tests = tests.length;
+    const discussions = resolveLinkedDiscussions(context.discussionsByPath.get(path) || [], context.byId);
+
+    const result = { consequences, risks: entry.issues };
+    if (discussions.length) result.discussions = discussions;
+    return result;
+}
+
+function createCachedReader(readFile) {
+    const fileCache = new Map();
+    return (path) => {
+        if (!path) return '';
+        let text = fileCache.get(path);
+        if (text === undefined) {
+            text = readFile ? (readFile(path) || '') : '';
+            fileCache.set(path, text);
+        }
+        return text;
+    };
+}
+
+function collectEdgeImpacts(edges, idToPath, edgeContext) {
+    for (const edge of edges) {
+        const fromPath = idToPath.get(edge.from);
+        const toPath = idToPath.get(edge.to);
+        EDGE_COLLECTORS[edge.type]?.(edge, fromPath, toPath, edgeContext);
+    }
+}
+
+const strength = (edge) => edge.strength ?? edge.weight ?? 0;
+const strongest = (edges, other) => edges.sort((a, b) => strength(b) - strength(a)).map(other).filter(Boolean).slice(0, TOP);
+
 /**
  * @param {Object} graph - graph model (nodes Map, edges array)
  * @param {string[]} paths - the code files to describe
- * @param {{readFile?: (path: string) => string|null, coverage?: Map<string, number>}} [deps] - tests are read to see which
- *   exports they name; coverage (% lines per file) adds the low-coverage risk
+ * @param {{readFile?: (path: string) => string|null, coverage?: Map<string, number>}} [deps]
  * @returns {Map<string, {consequences: object, risks: string[]}>}
  */
 export function fileImpact(graph, paths, { readFile, coverage } = {}) {
     const result = new Map();
     if (!paths.length) return result;
 
-    const fileCache = new Map();
-    const readCached = (path) => {
-        if (!path) return '';
-        let text = fileCache.get(path);
-        if (text === undefined) {
-            text = readFile ? (readFile(path) ?? '') : '';
-            fileCache.set(path, text);
-        }
-        return text;
-    };
-
+    const readCached = createCachedReader(readFile);
     const health = new Map(codeHealth(graph, { readFile: readCached, coverage, only: paths }).files.map(entry => [entry.path, entry]));
     const idToPath = new Map([...graph.nodes.values()].map(node => [node.id, node.path]));
     const byId = graph.nodes;
     const byPath = new Map([...graph.nodes.values()].map(node => [node.path, node]));
-    const strength = (edge) => edge.strength ?? edge.weight ?? 0;
-    const strongest = (edges, other) => edges.sort((a, b) => strength(b) - strength(a)).map(other).filter(Boolean).slice(0, TOP);
 
-    // Pre-index edges for O(1) lookup per path instead of full edge scans per path
     const callsByTo = new Map();
     const coChangesByPath = new Map();
     const discussionsByPath = new Map();
     const directImportersByTo = new Map();
 
-    for (const edge of graph.edges) {
-        if (edge.type === 'DISCUSSES' || edge.type === 'DISCUSSED_IN') {
-            const discTarget = edge.type === 'DISCUSSES' ? idToPath.get(edge.to) : idToPath.get(edge.from);
-            if (discTarget) {
-                let list = discussionsByPath.get(discTarget);
-                if (!list) { list = []; discussionsByPath.set(discTarget, list); }
-                list.push(edge);
-            }
-            continue;
-        }
+    collectEdgeImpacts(graph.edges, idToPath, { callsByTo, coChangesByPath, directImportersByTo, discussionsByPath, byId });
 
-        const fromPath = idToPath.get(edge.from);
-        const toPath = idToPath.get(edge.to);
-        if (!fromPath || !toPath) continue;
-
-        if (edge.type === 'CALLS' && fromPath !== toPath && !isTest(byId.get(edge.from))) {
-            let list = callsByTo.get(toPath);
-            if (!list) { list = []; callsByTo.set(toPath, list); }
-            list.push(edge);
-        } else if (edge.type === 'CO_CHANGES') {
-            let listFrom = coChangesByPath.get(fromPath);
-            if (!listFrom) { listFrom = []; coChangesByPath.set(fromPath, listFrom); }
-            listFrom.push(edge);
-
-            let listTo = coChangesByPath.get(toPath);
-            if (!listTo) { listTo = []; coChangesByPath.set(toPath, listTo); }
-            listTo.push(edge);
-        } else if (edge.type === 'IMPORTS') {
-            let list = directImportersByTo.get(toPath);
-            if (!list) { list = []; directImportersByTo.set(toPath, list); }
-            list.push(fromPath);
-        }
-    }
-
+    const context = { health, graph, idToPath, byId, byPath, directImportersByTo, callsByTo, coChangesByPath, discussionsByPath, readCached, strongest };
     for (const path of paths) {
-        const entry = health.get(path);
-        if (!entry) continue;
-
-        const reach = barrelReach(graph, [path], idToPath);
-        const importers = new Set();
-        for (const target of reach) {
-            const list = directImportersByTo.get(target);
-            if (list) {
-                for (const from of list) {
-                    if (!reach.has(from)) importers.add(from);
-                }
-            }
-        }
-
-        const calls = callsByTo.get(path) || [];
-        const together = coChangesByPath.get(path) || [];
-
-        // Compile export regex once for this file
-        const exports = Array.isArray(byPath.get(path)?.exports) ? byPath.get(path).exports.filter(Boolean) : [];
-        let exportRegex = null;
-        if (exports.length) {
-            const escaped = exports.map(e => String(e).replace(/[$]/g, '\\$')).join('|');
-            if (escaped) exportRegex = new RegExp(`(^|[^\\w$])(?:${escaped})(?![\\w$])`);
-        }
-        const tests = exportRegex ? entry.tests.filter(test => exportRegex.test(readCached(test))) : entry.tests;
-
-        const discEdges = discussionsByPath.get(path) || [];
-        const linkedDiscussions = discEdges.map(edge => {
-            const discNode = byId.get(edge.from.startsWith('discussion:') ? edge.from : edge.to);
-            return discNode ? (discNode.title || discNode.name || discNode.id) : (edge.from.startsWith('discussion:') ? edge.from : edge.to);
-        });
-        const uniqueDiscussions = [...new Set(linkedDiscussions)];
-
-        result.set(path, {
-            consequences: {
-                importedBy: importers.size,
-                calledBy: strongest(calls, edge => idToPath.get(edge.from)),
-                tests: tests.length,
-                changesWith: strongest(together, edge => idToPath.get(edge.from) === path ? idToPath.get(edge.to) : idToPath.get(edge.from))
-            },
-            risks: entry.issues,
-            ...(uniqueDiscussions.length ? { discussions: uniqueDiscussions } : {})
-        });
+        const impact = computePathImpact(path, context);
+        if (impact) result.set(path, impact);
     }
     return result;
 }

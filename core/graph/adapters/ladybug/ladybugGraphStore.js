@@ -15,6 +15,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { Database, Connection } from '@ladybugdb/core';
 import { MEMORY_DIR, lensEnv } from '../../../configuration/index.js';
+import { writeInBatches } from './writeBatches.js';
 
 export const DEFAULT_LADYBUG_PATH = path.join(MEMORY_DIR, 'graph', 'project.lbdb');
 export const SCHEMA_VERSION = '2';
@@ -65,13 +66,17 @@ async function run(connection, statement, params) {
     }
 }
 
+async function runSchemaStatement(connection, statement) {
+    try {
+        await run(connection, statement);
+    } catch (error) {
+        if (!isAlreadyExistsError(error)) throw error;
+    }
+}
+
 async function migrate(connection) {
     for (const statement of SCHEMA_STATEMENTS) {
-        try {
-            await run(connection, statement);
-        } catch (error) {
-            if (!isAlreadyExistsError(error)) throw error;
-        }
+        await runSchemaStatement(connection, statement);
     }
     // Version 1 databases have Entity without `scope`.
     try {
@@ -144,11 +149,7 @@ export async function upsertEntities(graph, entities) {
     if (!entities.length) return 0;
     const rows = entities.map(entityRow);
     const assignments = ENTITY_COLUMNS.filter(column => column !== 'id').map(column => `n.${column} = r.${column}`).join(', ');
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-        const batch = rows.slice(i, i + BATCH_SIZE);
-        await graph.query(`UNWIND $rows AS r MERGE (n:Entity {id: r.id}) SET ${assignments}`, { rows: batch });
-    }
-    return rows.length;
+    return writeInBatches(rows, batch => graph.query(`UNWIND $rows AS r MERGE (n:Entity {id: r.id}) SET ${assignments}`, { rows: batch }), { maxRows: BATCH_SIZE });
 }
 
 /** Create many relations in one statement (both endpoints must exist; missing ones are skipped by MATCH). */
@@ -163,17 +164,13 @@ export async function createRelations(graph, relations) {
         created_at: String(relation.createdAt ?? ''),
         updated_at: String(relation.updatedAt ?? relation.createdAt ?? '')
     }));
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-        const batch = rows.slice(i, i + BATCH_SIZE);
-        await graph.query(
-            // WHERE uses the primary-key index; an {id: r.from} map inside UNWIND scanned every node (8,000 rows: 21 s -> 0.5 s).
-            'UNWIND $rows AS r MATCH (a:Entity) WHERE a.id = r.from MATCH (b:Entity) WHERE b.id = r.to '
-            + 'MERGE (a)-[e:RELATES {relation: r.relation}]->(b) '
-            + 'SET e.confidence = r.confidence, e.weight = r.weight, e.created_at = r.created_at, e.updated_at = r.updated_at',
-            { rows: batch }
-        );
-    }
-    return rows.length;
+    return writeInBatches(rows, batch => graph.query(
+        // WHERE uses the primary-key index; an {id: r.from} map inside UNWIND scanned every node (8,000 rows: 21 s -> 0.5 s).
+        'UNWIND $rows AS r MATCH (a:Entity) WHERE a.id = r.from MATCH (b:Entity) WHERE b.id = r.to '
+        + 'MERGE (a)-[e:RELATES {relation: r.relation}]->(b) '
+        + 'SET e.confidence = r.confidence, e.weight = r.weight, e.created_at = r.created_at, e.updated_at = r.updated_at',
+        { rows: batch }
+    ), { maxRows: BATCH_SIZE });
 }
 
 

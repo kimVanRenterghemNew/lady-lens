@@ -17,6 +17,41 @@ const IDENTIFIER_RE = /^[a-zA-Z_$][a-zA-Z0-9_$]*$/;
  * @param {string} [req.sessionId] - Actieve sessie ID
  * @returns {Promise<object>} Geconsolideerd zoekresultaat met line ranges
  */
+function getChunkLines(primary) {
+    const startLine = Number.isInteger(primary.startLine) ? primary.startLine : 1;
+    const endLine = Number.isInteger(primary.endLine) ? primary.endLine : (startLine + 20);
+    return { startLine, endLine };
+}
+
+function readSymbolChunk(primary) {
+    const targetPath = primary.path || primary.file;
+    const { startLine, endLine } = getChunkLines(primary);
+    const chunk = read_chunk({ path: targetPath, startLine, endLine });
+    return { targetPath, startLine, content: chunk && chunk.content ? chunk.content : '' };
+}
+
+const isValidSymbolResult = d => Boolean(d && !d.error && d.found && d.locations?.length);
+
+async function tryGraphSymbol(rawTarget) {
+    try {
+        const defined = await definedInTool({ symbol: rawTarget });
+        if (!isValidSymbolResult(defined)) return null;
+        const primary = defined.locations[0];
+        const { targetPath, startLine, content } = readSymbolChunk(primary);
+        return {
+            strategy: 'graph_symbol',
+            symbol: rawTarget,
+            file: targetPath,
+            line: startLine,
+            locations: defined.locations,
+            chunk: content,
+            source: 'graph'
+        };
+    } catch {
+        return null;
+    }
+}
+
 export async function resolveCodebaseQuery(req = {}) {
     const rawTarget = (req.query || req.pattern || req.node || '').trim();
     if (!rawTarget && !req.node) {
@@ -31,27 +66,8 @@ export async function resolveCodebaseQuery(req = {}) {
     // Strategie 2: Is het een JavaScript identifier (functie, klasse, constante)?
     // Vraag eerst de AST/kennisgraaf om directe definitie en export locaties.
     if (IDENTIFIER_RE.test(rawTarget)) {
-        try {
-            const defined = await definedInTool({ symbol: rawTarget });
-            if (defined && !defined.error && defined.found && defined.locations?.length) {
-                const primary = defined.locations[0];
-                const targetPath = primary.path || primary.file;
-                const chunk = read_chunk({
-                    path: targetPath,
-                    startLine: primary.startLine || 1,
-                    endLine: primary.endLine || (primary.startLine ? primary.startLine + 20 : 50)
-                });
-                return {
-                    strategy: 'graph_symbol',
-                    symbol: rawTarget,
-                    file: targetPath,
-                    line: primary.startLine,
-                    locations: defined.locations,
-                    chunk: chunk.content || '',
-                    source: 'graph'
-                };
-            }
-        } catch { /* no symbol answer from the graph: try the next strategy */ }
+        const symbolResult = await tryGraphSymbol(rawTarget);
+        if (symbolResult) return symbolResult;
     }
 
     // Strategie 3: Algemene graph context query

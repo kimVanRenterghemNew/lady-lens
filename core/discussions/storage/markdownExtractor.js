@@ -12,27 +12,22 @@ import { parseDiscussionMarkdown } from '../model/index.js';
  * @param {string} dirPath
  * @returns {Array}
  */
+const extractEntry = (entry, dirPath) => {
+    const fullPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) return extractDiscussionsFromDirectory(fullPath);
+    if (!entry.name.endsWith('.md')) return [];
+    try {
+        const content = fs.readFileSync(fullPath, 'utf8');
+        const parsed = parseDiscussionMarkdown(content, entry.name);
+        const isMatch = parsed.tags?.includes('discussion') || entry.name.includes('discussion') || dirPath.includes('discussions');
+        return isMatch ? [parsed] : [];
+    } catch {
+        return [];
+    }
+};
+
 export function extractDiscussionsFromDirectory(dirPath) {
     if (!dirPath || !fs.existsSync(dirPath)) return [];
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    const records = [];
-
-    for (const entry of entries) {
-        const fullPath = path.join(dirPath, entry.name);
-        if (entry.isDirectory()) {
-            records.push(...extractDiscussionsFromDirectory(fullPath));
-        } else if (entry.name.endsWith('.md')) {
-            try {
-                const content = fs.readFileSync(fullPath, 'utf8');
-                const parsed = parseDiscussionMarkdown(content, entry.name);
-                if (parsed.tags?.includes('discussion') || entry.name.includes('discussion') || dirPath.includes('discussions')) {
-                    records.push(parsed);
-                }
-            } catch {
-                // skip malformed markdown
-            }
-        }
-    }
-
-    return records;
+    return fs.readdirSync(dirPath, { withFileTypes: true })
+        .flatMap(entry => extractEntry(entry, dirPath));
 }

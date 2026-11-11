@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { agentTargets, serverEntry, runAgentInstall, runSkillInstall, formatAgentInstall } from '../core/mcp/index.js';
+import { agentTargets, serverEntry, runAgentInstall, runSkillInstall, runRefresh, formatAgentInstall, agentInstallCommand } from '../core/mcp/index.js';
 
 const LENS = path.resolve('bin/lens.mjs');
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')).version;
@@ -107,6 +107,17 @@ describe('agent install', () => {
         expect(formatAgentInstall(results).ok).toBe(false);
     });
 
+    it('Antigravity CLI: a hand-made /sse url entry becomes a stdio entry in ~/.gemini/config/mcp_config.json, also on refresh', () => {
+        fs.mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+        fs.mkdirSync(path.join(home, '.gemini', 'config'), { recursive: true });
+        const file = path.join(home, '.gemini', 'config', 'mcp_config.json');
+        fs.writeFileSync(file, JSON.stringify({ mcpServers: { 'lady-lens': { url: 'http://127.0.0.1:4318/sse' } } }));
+        expect(target('antigravity-cli').file).toBe(file);
+        expect(runRefresh({ lensPath: LENS, env }).map(r => [r.id, r.status])).toEqual([['antigravity-cli', 'updated']]);
+        expect(read(file).mcpServers['lady-lens']).toEqual(expect.objectContaining({ command: process.execPath, args: [LENS, 'mcp', '--stdio'] }));
+        expect(read(file).mcpServers['lady-lens'].url).toBeUndefined();
+    });
+
     it('installs only into agents that are present, keeping their other servers', () => {
         fs.mkdirSync(path.join(home, '.cursor'));
         fs.writeFileSync(target('cursor').file, JSON.stringify({ mcpServers: { other: { url: 'x' } }, theme: 'dark' }));
@@ -183,6 +194,35 @@ describe('agent install', () => {
         expect(winDefault.find(t => t.id === 'vscode').file).toContain(path.join('AppData', 'Roaming', 'Code', 'User'));
         expect(mac.find(t => t.id === 'vscode').file).toContain(path.join('Library', 'Application Support', 'Code', 'User'));
         expect(serverEntry({ lensPath: LENS, typed: true }).type).toBe('stdio');
+    });
+
+    it('reads `lens install skill-mendix vscode claude-code` as the Mendix skill for those agents, and names an unknown agent', () => {
+        for (const dir of ['.claude', '.copilot', '.agents']) fs.mkdirSync(path.join(home, dir));
+        const mendix = agentInstallCommand({ action: 'install', ids: ['skill-mendix', 'vscode', 'claude-code'], lensPath: LENS, env });
+        expect(mendix.ok).toBe(true);
+        expect(['claude', 'copilot', 'agents'].map(dir => fs.existsSync(path.join(home, `.${dir}`, 'skills', 'lady-lens-mendix', 'SKILL.md')))).toEqual([true, true, false]);
+        const main = agentInstallCommand({ action: 'install', ids: ['skill', 'codex', 'nope'], lensPath: LENS, env });
+        expect(main.ok).toBe(false);
+        expect(main.text).toMatch(/error +nope .*unknown agent/);
+        expect(fs.existsSync(path.join(home, '.agents', 'skills', 'lady-lens', 'SKILL.md'))).toBe(true);
+        expect(fs.existsSync(path.join(home, '.claude', 'skills', 'lady-lens', 'SKILL.md'))).toBe(false);
+    });
+
+    it('refresh after an update: only where lady-lens is registered or its skill installed, keeping a --repo; dry run writes nothing', () => {
+        fs.mkdirSync(path.join(home, '.cursor'));
+        fs.mkdirSync(path.join(home, '.codeium', 'windsurf'), { recursive: true });
+        fs.writeFileSync(target('cursor').file, JSON.stringify({ mcpServers: { 'lady-lens': { command: 'old-node', args: ['/old/lens.mjs', 'mcp', '--stdio', '--repo', '/work/app'] } } }));
+        fs.mkdirSync(path.join(home, '.claude', 'skills', 'lady-lens'), { recursive: true });
+        fs.writeFileSync(path.join(home, '.claude', 'skills', 'lady-lens', 'SKILL.md'), 'old skill');
+        const before = fs.readFileSync(target('cursor').file, 'utf8');
+        expect(runRefresh({ lensPath: LENS, env, dryRun: true }).map(r => [r.id, r.status])).toEqual([['cursor', 'updated'], ['claude', 'updated']]);
+        expect(fs.readFileSync(target('cursor').file, 'utf8')).toBe(before);
+        runRefresh({ lensPath: LENS, env });
+        expect(read(target('cursor').file).mcpServers['lady-lens']).toMatchObject({ command: process.execPath, args: [LENS, 'mcp', '--stdio', '--repo', '/work/app'] });
+        expect(fs.existsSync(target('windsurf').file)).toBe(false);
+        expect(fs.readFileSync(path.join(home, '.claude', 'skills', 'lady-lens', 'SKILL.md'), 'utf8')).toContain('Lady-lens workflow');
+        expect(fs.existsSync(path.join(home, '.claude', 'skills', 'lady-lens-mendix'))).toBe(false);
+        expect(fs.existsSync(path.join(home, '.claude', 'CLAUDE.md'))).toBe(false);
     });
 
     it('tells the user to restart the agent after a change', () => {

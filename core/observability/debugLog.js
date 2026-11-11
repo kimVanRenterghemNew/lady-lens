@@ -21,3 +21,19 @@ export function debug(level, tag, message) {
     const text = typeof message === 'function' ? message() : message;
     try { fs.appendFileSync(file, `${new Date().toISOString()} [${tag}] ${text}\n`); } catch { /* logging never breaks the graph */ }
 }
+
+const heapMb = () => Math.round(process.memoryUsage().rss / 1048576);
+
+/** Runs `fn` and logs (level 1) how long it took, `summary(result)` and the process memory; a failure is logged with its stack and rethrown. */
+export async function debugStep(tag, label, fn, summary = () => '') {
+    const started = Date.now();
+    debug(1, tag, () => `${label}: start (rss ${heapMb()} MB)`);
+    try {
+        const result = await fn();
+        debug(1, tag, () => `${label}: ${Date.now() - started} ms ${summary(result)} (rss ${heapMb()} MB)`.replace(/ {2,}/g, ' '));
+        return result;
+    } catch (error) {
+        debug(1, tag, () => `${label}: FAILED after ${Date.now() - started} ms (rss ${heapMb()} MB)\n${error?.stack || error}${error?.cause ? `\ncause: ${error.cause.stack || error.cause}` : ''}`);
+        throw error;
+    }
+}

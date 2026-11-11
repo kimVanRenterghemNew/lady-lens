@@ -1,0 +1,87 @@
+<!-- The Graph Network tab of `lens ui`, inserted into graph-ui.html by graph-ui.mjs. At a function it shows the flow
+     diagram of its call chain (callers left, callees right, the function and the frames of the last stack trace marked;
+     a click goes there, Mermaid gives the text); at a file, or without a place, the overview of files and their edges. -->
+<script>
+const TYPES = { Code: '#3498db', Test: '#2ecc71', Doc: '#e67e22', Script: '#1abc9c', Config: '#f1c40f' };
+const typeOf = (p, k) => k === 'test' ? 'Test' : k === 'doc' || /\.md$/.test(p) ? 'Doc' : k === 'script' ? 'Script' : k === 'config' ? 'Config' : /^configs\/|\.(ya?ml|json)$/.test(p) ? 'Config' : 'Code';
+let cy = null, flowNow = null, graphSeq = 0;
+
+function graphCanvas() {
+  if (cy) return cy;
+  cy = cytoscape({ container: $('#cy'), wheelSensitivity: 0.25, style: [
+    { selector: 'node', style: { 'background-color': 'data(color)', width: 44, height: 44, label: 'data(label)', color: '#fff', 'font-size': 8, 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'ellipsis', 'text-max-width': 40, 'border-width': 2, 'border-color': '#0002' } },
+    { selector: 'node[ring]', style: { 'border-color': 'data(ring)', 'border-width': 'data(ringWidth)' } },
+    { selector: 'node.flow', style: { shape: 'round-rectangle', width: 150, height: 34, 'text-max-width': 140, 'font-size': 10 } },
+    { selector: 'node.root', style: { 'border-color': '#2563eb', 'border-width': 4 } },
+    { selector: 'node.traced', style: { 'border-color': '#dc2626', 'border-width': 4, 'border-style': 'double' } },
+    { selector: 'node.here', style: { 'border-color': '#2563eb', 'border-width': 5 } },
+    { selector: 'edge', style: { width: 1.2, 'line-color': '#94948c', 'target-arrow-color': '#94948c', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } }
+  ] });
+  cy.on('tap', 'node', e => {
+    const d = e.target.data();
+    if (d.flow) go({ tab: 'graph', path: d.path, line: d.line || 1 });
+    else go({ tab: 'search', path: d.path, line: 1 });
+  });
+  return cy;
+}
+
+async function drawOverview(path) {
+  const ov = await getJson(api('/api/overview')), g = graphCanvas();
+  flowNow = null;
+  g.elements().remove();
+  const shown = new Set(ov.nodes.slice(0, 100).map(n => n.id));
+  const mine = ov.nodes.find(n => n.path === path);
+  if (mine && !shown.has(mine.id)) shown.add(mine.id);
+  for (const n of ov.nodes.filter(n => shown.has(n.id))) {
+    const iss = n.issues || [];
+    g.add({ data: { id: n.id, path: n.path, label: n.path.split('/').pop(), color: TYPES[typeOf(n.path, n.kind)], ring: iss.length ? (iss.length > 1 ? '#e5534b' : '#f0a020') : '#0002', ringWidth: iss.length ? 4 : 2 }, classes: n.path === path ? 'here' : '' });
+  }
+  for (const e of ov.edges.filter(e => shown.has(e.from) && shown.has(e.to))) g.add({ data: { id: `${e.from}|${e.type}|${e.to}`, source: e.from, target: e.to } });
+  g.layout({ name: 'cose', animate: false, padding: 30 }).run();
+  $('#hint').textContent = `Overzicht: ${g.nodes().length} bestanden in beeld · ${ov.nodes.length} totaal` + (path ? ' · geen functie op deze plek' : '');
+}
+
+/** Callers to the left (negative level), callees to the right, one column per level. */
+function drawFlow(flow) {
+  const g = graphCanvas(), count = new Map(), row = new Map();
+  flowNow = flow;
+  g.elements().remove();
+  for (const n of flow.nodes) count.set(n.level, (count.get(n.level) ?? 0) + 1);
+  for (const n of flow.nodes) {
+    const r = row.get(n.level) ?? 0;
+    row.set(n.level, r + 1);
+    g.add({ data: { id: n.id, flow: true, path: n.path, line: n.line, label: n.name, color: n.level < 0 ? '#7c3aed' : n.level > 0 ? '#0891b2' : '#2563eb' }, classes: ['flow', n.id === flow.root ? 'root' : '', traceMarks.has(n.id) ? 'traced' : ''].join(' '), position: { x: n.level * 210, y: (r - (count.get(n.level) - 1) / 2) * 60 } });
+  }
+  for (const e of flow.edges) g.add({ data: { id: `${e.from}>${e.to}`, source: e.from, target: e.to } });
+  g.layout({ name: 'preset', padding: 30 }).run();
+  $('#hint').textContent = `Stroomschema: ${flow.nodes.length} functies` + (flow.truncated ? ' (afgekapt)' : '') + ' · klik een functie om erheen te gaan';
+}
+
+async function showFlow(place) {
+  const mine = ++graphSeq;
+  $('#mermaid-out').hidden = true;
+  if (!place.path) return drawOverview(null);
+  const at = await getJson(api(`/api/at?path=${encodeURIComponent(place.path)}&line=${place.line || 1}`));
+  if (mine !== graphSeq) return;
+  if (!at.symbol) return drawOverview(place.path);
+  const flow = await getJson(api(`/api/flow?symbol=${encodeURIComponent(at.symbol)}&path=${encodeURIComponent(at.path)}&depth=${$('#flow-depth').value}&direction=${$('#flow-dir').value}`));
+  if (mine !== graphSeq) return;
+  if (flow.root) drawFlow(flow); else drawOverview(place.path);
+}
+
+define('lens-graph', {
+  wire() {
+    $('#fit').onclick = () => cy?.fit(undefined, 30);
+    $('#flow-depth').onchange = $('#flow-dir').onchange = () => showFlow(here);
+    $('#flow-overview').onclick = () => go({ tab: 'graph', path: null, line: null });
+    $('#flow-code').onclick = () => go({ tab: 'search' });
+    $('#flow-mermaid').onclick = () => {
+      const box = $('#mermaid-out');
+      box.textContent = flowNow?.mermaid || 'Geen stroomschema: ga eerst naar een functie.';
+      box.hidden = !box.hidden;
+      if (flowNow?.mermaid) navigator.clipboard?.writeText(flowNow.mermaid).catch(() => {});
+    };
+  },
+  load() { showFlow(here); setTimeout(() => cy?.resize(), 50); }
+});
+</script>
