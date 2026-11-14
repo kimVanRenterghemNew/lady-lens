@@ -40,6 +40,7 @@ const makeRoot = () => {
 };
 
 afterEach(() => {
+    process.env.LENS_MDL_EXPORT = 'off';
     delete process.env.LENS_MXCLI_PATH;
     delete process.env.LENS_MXCLI_MODE;
     for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
@@ -106,6 +107,7 @@ describe('Mendix mxcli contributor', () => {
         insert.run('Sales.NoText', 'PAGE', null);
         db.close();
         process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        process.env.LENS_MDL_EXPORT = 'inline';
         await mendixContributor({ root });
         const page = path.join(root, '.mxcli', 'mdl', 'Sales', 'Order_New.page.mdl');
         expect(fs.readFileSync(page, 'utf8').split('\n')[1]).toContain("FilterType: 'startsWith'");
@@ -152,6 +154,20 @@ describe('Mendix contribution cache', () => {
         fs.writeFileSync(project, 'binary placeholder, changed');
         await mendixContributor({ root });
         expect(execFile.mock.calls.length).toBeGreaterThan(calls);
+    });
+
+    it('keeps the previous model when mxcli gives nothing after a change, also twice in a row (a live project: mxcli hung)', async () => {
+        const root = makeRoot();
+        const project = path.join(root, 'App.mpr');
+        fs.writeFileSync(project, 'binary placeholder');
+        process.env.LENS_MXCLI_PATH = 'test-mxcli';
+        const first = await mendixContributor({ root });
+        expect(first.nodes.length).toBeGreaterThan(0);
+        process.env.LENS_MXCLI_PATH = path.join(root, 'missing-mxcli');
+        fs.writeFileSync(project, 'binary placeholder, saved');
+        expect(await mendixContributor({ root })).toEqual(first);
+        fs.writeFileSync(project, 'binary placeholder, saved again');
+        expect(await mendixContributor({ root })).toEqual(first);
     });
 
     it('an unreadable cache is asked again, not an error', async () => {

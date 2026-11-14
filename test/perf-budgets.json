@@ -1,0 +1,14 @@
+{
+  "analysis: bridges": 133,
+  "analysis: codeHealth": 50,
+  "analysis: diff_impact": 1745,
+  "direct: definedIn + exports + exists": 512,
+  "load graph: cold": 683,
+  "query: graph_query": 1217,
+  "query: rankGraphNodes": 50,
+  "search: cross_repo_search": 50,
+  "sync: full": 16370,
+  "sync: incremental (unchanged)": 1174,
+  "view: folderView": 772,
+  "view: functionView": 605
+}

@@ -108,7 +108,7 @@ Elke beheerbewerking is één bestand in `core/mcp/handlers/` dat gewone data te
 | Complexiteit ≤ 5 per functie | ESLint `complexity` plus uitzonderingslijst die alleen krimpt | 🗺️ |
 | Geen `else if`-ketens, geen diepe nesting | ESLint `no-restricted-syntax`, `max-depth`, `no-else-return` | 🗺️ |
 | Ontwerpgeuren zichtbaar | `lens ask health` (zie 7) | 🗺️ |
-| Prestaties bewaakt | `test/performance.test.js`, `runGraphEval`, `scripts/benchmark.mjs`, `scripts/lens-scale.mjs` | ✅, uit te breiden |
+| Prestaties bewaakt | `test/performance.test.js` met `test/perf-budgets.json` (ratchet), `core/bench` (`npm run bench`, `bench:compare`, `lens bench`), `runGraphEval`, `scripts/lens-scale.mjs` | ✅ |
 
 Meting 2026-11-02 met lens zelf: 156 van 686 functies (23%) boven complexiteit 5, waarvan 39 boven 15. Die vormen de beginlijst voor de uitzonderingen (`backlog/if-ketens-afdwingen.md`).
 

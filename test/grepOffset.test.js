@@ -1,5 +1,5 @@
 /**
- * a C# repository, 2026-10-29: 24 matches for a C# command, 12 shown (the answer budget is full of long doc lines);
+ * A C# repository, 2026-10-29: 24 matches for a C# command, 12 shown (the answer budget is full of long doc lines);
  * the code files came after the docs and were cut. grep pages with `offset`, so the next page can be asked for.
  */
 import { describe, it, expect, afterAll } from 'vitest';

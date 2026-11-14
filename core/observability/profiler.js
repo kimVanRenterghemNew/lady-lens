@@ -8,6 +8,9 @@
  */
 import { performance } from 'perf_hooks';
 
+/** Separates a phase from its parent in a label: `sync: parse > .js` is part of `sync: parse`. */
+export const NESTED = ' > ';
+
 export function createProfiler(name = 'default') {
     const measurements = new Map();
     const activeTimers = new Map();
@@ -70,7 +73,8 @@ export function createProfiler(name = 'default') {
     }
 
     function getStats() {
-        const grandTotal = Array.from(measurements.values()).reduce((sum, e) => sum + e.totalMs, 0);
+        // a nested label ("sync: parse > .js") is part of its parent: counting it again would push the percentages over 100
+        const grandTotal = Array.from(measurements.values()).filter(e => !e.label.includes(NESTED)).reduce((sum, e) => sum + e.totalMs, 0);
         const stats = [];
         for (const [label, e] of measurements.entries()) {
             const avgMs = e.count > 0 ? e.totalMs / e.count : 0;

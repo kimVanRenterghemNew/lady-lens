@@ -28,7 +28,33 @@ export const HAND_NL_EN = {
     controleren: ['check', 'validate'], valideren: ['validate'], samenvatting: ['summary'], bericht: ['message'],
     huidige: ['current'], toon: ['show', 'print'], toont: ['show', 'print'], tonen: ['show', 'print'], aantal: ['count'], zoeken: ['search', 'find'], vinden: ['find'],
     geheugen: ['memory'], uitvoer: ['output'], invoer: ['input'], weergave: ['view', 'display'], planning: ['plan'],
-    onderzoek: ['research'], bewijs: ['evidence'], kennis: ['knowledge'], beslissing: ['decision'], beslissingen: ['decisions']
+    onderzoek: ['research'], bewijs: ['evidence'], kennis: ['knowledge'], beslissing: ['decision'], beslissingen: ['decisions'],
+    // behaviour as a request describes it (backlog/zoeken-op-gedrag.md): only Dutch-only words, a word that is also English
+    // (plan, model, start, open) would get the low weight of a translated word
+    vraag: ['question'], vragen: ['questions'], antwoord: ['answer', 'reply', 'response'], antwoorden: ['answers', 'reply'],
+    typt: ['type', 'input'], typen: ['type', 'input'], getypt: ['typed', 'input'], werk: ['work', 'job'],
+    starten: ['start'], gestart: ['started'], stoppen: ['stop'], wachten: ['wait'], wacht: ['wait'],
+    discussie: ['discuss', 'discussion'], plannen: ['plan', 'planning'], coderen: ['code', 'coder'], lokaal: ['local'], lokale: ['local'],
+    begrensd: ['limit', 'max'], begrenzen: ['limit', 'max'], limiet: ['limit'], instelbaar: ['setting', 'config', 'option'],
+    instelling: ['setting', 'config', 'option'], instellen: ['configure', 'setting'], veld: ['field'], velden: ['fields'],
+    verplicht: ['required'], verplichte: ['required'], beschreven: ['described', 'description'], beschrijving: ['description'],
+    herhalen: ['repeat', 'retry'], opnieuw: ['retry', 'again'], kiezen: ['choose', 'select', 'pick'], keuze: ['choice', 'select'],
+    passende: ['matching', 'match', 'best'], bevriest: ['freeze', 'hang'], leeg: ['empty', 'nothing'], lege: ['empty', 'nothing'],
+    mislukt: ['failed', 'fail', 'failure'], mislukte: ['failed', 'fail', 'failure'], poging: ['attempt', 'retry'], pogingen: ['attempts', 'retry'],
+    overslaan: ['skip'], afbreken: ['abort', 'cancel'], bevestigen: ['confirm'], bevestiging: ['confirm', 'confirmation'],
+    weigeren: ['reject', 'refuse'], toestaan: ['allow'], nieuwe: ['new'], lijst: ['list'], regel: ['line', 'rule'], regels: ['lines', 'rules'],
+    tekst: ['text'], schrijven: ['write'], lezen: ['read'], maken: ['create', 'make'], bijwerken: ['update'], wijzigen: ['change', 'modify'],
+    wijziging: ['change'], wijzigingen: ['changes'], vergelijken: ['compare'], samenvoegen: ['merge'], splitsen: ['split'],
+    sorteren: ['sort'], scherm: ['screen'], knop: ['button'], pagina: ['page'], lus: ['loop'], tijdslimiet: ['timeout'],
+    kort: ['short', 'brief'], korte: ['short', 'brief'], werkelijke: ['actual', 'real'], integreren: ['integrate'], aparte: ['separate'],
+    acceptatiecriteria: ['acceptance', 'criteria'], verhaal: ['story'], melding: ['message', 'notify'], sturen: ['send'], versturen: ['send'],
+    ontvangen: ['receive'], gedrag: ['behaviour', 'behavior'], importeren: ['import'], exporteren: ['export'],
+    // "hoe ziet een story eruit": its form
+    eruitziet: ['template', 'format'], eruitzien: ['template', 'format'],
+    // states a request names (backlog/toestand-in-de-code.md)
+    gepauzeerd: ['paused', 'pause'], pauzeren: ['pause'], bezig: ['busy', 'running', 'progress'], stopte: ['stopped', 'interrupted'],
+    gestopt: ['stopped', 'interrupted'], onderbroken: ['interrupted'], ingelogd: ['login', 'authenticated'], openstaat: ['open', 'pending'],
+    afgerond: ['done', 'finished', 'completed']
 };
 
 /**

@@ -7,6 +7,7 @@
 import { tokenize, sharesStem } from './rankTokens.js';
 import { findTypoCorrections, computeTermWeights } from './rankCorrections.js';
 import { getNodeSearchIndex } from './searchIndex.js';
+import { NL_EN } from '../../language/index.js';
 
 export { tokenize } from './rankTokens.js';
 export { IDF_MIN_NODES } from './rankCorrections.js';
@@ -26,7 +27,8 @@ export const asksForDocuments = (text) => tokenize(text).some(term => DOC_WORDS.
 const NAME_MATCHERS = [
     { match: (idx, term, clean) => term === idx.stem || (clean && clean === idx.stemClean), score: 6, inName: true },
     { match: (idx, term) => idx.segments.includes(term), score: 4, inName: true },
-    { match: (idx, term) => idx.exportTokens.has(term), score: 4, inName: false },
+    // a barrel re-exports what other files define: its exports count as symbols (a test fixture's index.js is a test)
+    { match: (idx, term) => (!idx.isBarrel || idx.isTest) && idx.exportTokens.has(term), score: 4, inName: false },
     { match: (idx, term) => idx.symbolTokens.has(term), score: 2, inName: false }
 ];
 
@@ -39,8 +41,7 @@ function checkTextMatch(term, idx) {
 
 function checkStemOrPathMatch(term, idx) {
     if (term.length >= 5 && sharesStem(term, idx.purposeTokens)) return 2;
-    if (idx.filePath.includes(term) || idx.other.includes(term)) return 1;
-    return 0;
+    return [idx.filePath, idx.other].some(field => field.includes?.(term) || field.has?.(term)) ? 1 : 0;
 }
 
 function scoreSecondaryMatches(term, idx, currentBest) {
@@ -97,8 +98,20 @@ function applyKindAdjustments(adjusted, idx, wantsTests, wantsDocs, terms) {
     return adjusted + barrelAdjustment(idx.isBarrel, terms);
 }
 
+/**
+ * A header that names several things the question asks about describes that behaviour ("free-form question -> persona
+ * selection -> one answer per persona"); each word alone counted half of a word in the path. Translated (Dutch) terms are
+ * left out, so a word and its translation do not count twice. Not for tests and docs: a test repeats the behaviour it
+ * checks, and rose above its module.
+ */
+const purposeBonus = (idx, terms) => {
+    if (idx.isTest || idx.isDoc) return 0;
+    const named = terms.filter(term => term.length >= 4 && !NL_EN[term] && idx.purposeTokens.includes(term)).length;
+    return named >= 3 ? 2 * (named - 2) : 0;
+};
+
 function calculateScoreBonus(matched, matchedWeight, idx, terms) {
-    let bonus = matched >= 2 ? 2 * Math.min(1, matchedWeight / matched) : 0;
+    let bonus = (matched >= 2 ? 2 * Math.min(1, matchedWeight / matched) : 0) + purposeBonus(idx, terms);
     if (idx.nameWords.length >= 2 && idx.nameWords.every(word => terms.includes(word))) {
         bonus += 6;
     }

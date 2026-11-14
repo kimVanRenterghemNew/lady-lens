@@ -6,7 +6,8 @@ export default defineConfig({
     test: {
         env: { LENS_PROJECT_GRAPH: '0' },
         setupFiles: ['test/setup/isolateGraph.js'],
-        exclude: [...configDefaults.exclude, '**/*.integration.test.js'],
+        // the performance tests run apart (scripts/perf.mjs, PERF_TESTS=1): timed among parallel workers they swung 5x
+        exclude: [...configDefaults.exclude, '**/*.integration.test.js', ...(process.env.PERF_TESTS ? [] : ['test/performance*.test.js'])],
         testTimeout: 90_000,
         hookTimeout: 90_000,
         maxWorkers: Math.max(2, Math.min(6, os.cpus().length - 1)),

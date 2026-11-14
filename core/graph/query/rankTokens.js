@@ -7,7 +7,10 @@ import { NL_EN } from '../../language/index.js';
 
 export const STOP_WORDS = new Set([
     'the', 'and', 'for', 'with', 'that', 'this', 'from', 'into', 'new', 'add', 'use', 'using', 'all', 'any', 'should', 'would', 'could', 'must', 'not', 'are', 'can', 'has', 'have', 'its', 'also', 'when', 'then',
-    'een', 'het', 'van', 'voor', 'die', 'dat', 'met', 'toe', 'aan', 'naar', 'kan', 'nog', 'ook', 'wel', 'zijn', 'wordt', 'niet', 'geen', 'maar', 'dan', 'als', 'bij', 'uit', 'over', 'onder', 'eerst', 'zonder', 'deze', 'door', 'mag', 'moet', 'dit', 'wat', 'hoe', 'zodat', 'gaan', 'gaat', 'worden', 'waar', 'wanneer', 'omdat', 'zou', 'zal', 'heeft', 'hebben', 'alle', 'elke', 'iets', 'graag'
+    'een', 'het', 'van', 'voor', 'die', 'dat', 'met', 'toe', 'aan', 'naar', 'kan', 'nog', 'ook', 'wel', 'zijn', 'wordt', 'niet', 'geen', 'maar', 'dan', 'als', 'bij', 'uit', 'over', 'onder', 'eerst', 'zonder', 'deze', 'door', 'mag', 'moet', 'dit', 'wat', 'hoe', 'zodat', 'gaan', 'gaat', 'worden', 'waar', 'wanneer', 'omdat', 'zou', 'zal', 'heeft', 'hebben', 'alle', 'elke', 'iets', 'graag',
+    // Dutch filler of a request that describes behaviour: rare in English code, so it weighed most and matched only Dutch prose
+    'twee', 'drie', 'keer', 'laten', 'krijgt', 'krijgen', 'hetzelfde', 'terwijl', 'zegt', 'doet', 'klopt', 'tijdens', 'welke', 'eruit',
+    'losse', 'echt', 'gewoon', 'steeds', 'altijd', 'nooit', 'was', 'toen', 'werd', 'waren', 'had'
 ]);
 
 function addWordTokens(tokens, raw) {

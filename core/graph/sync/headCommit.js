@@ -8,14 +8,26 @@ import { PROJECT_SCOPE } from '../model/index.js';
 export const commitNodeId = sha => `commit:${sha}`;
 export const branchNodeId = name => `branch:${name}`;
 
+/** No HEAD: no repository (null), or one git refuses ("dubious ownership"): then a `warning` with the fix, as the sync result
+ * showed no branch and no co-change without saying why. */
+function refusedBy(git) {
+    try { git.resolveCommit('HEAD'); return null; } catch (error) { return error.message; }
+}
+
+function headOrWarning(git) {
+    const head = git?.headInfo();
+    return head ? { head } : { warning: git ? refusedBy(git) : null };
+}
+
 /**
  * `{ sha, branch, commit, previous, commitsSince }`, or null without git. `previous` is the commit of the last sync on this
  * branch. Nothing is written when the file sync wrote nothing and HEAD did not move (a sync that changes nothing stays cheap).
  */
 export async function recordHead({ repository, git, wrote = true, now = new Date().toISOString() }) {
-    const head = git?.headInfo();
-    const branch = head && git.currentBranch();
-    if (!head || !branch || branch === 'HEAD') return null;
+    const { head, warning } = headOrWarning(git);
+    if (!head) return warning ? { warning } : null;
+    const branch = git.currentBranch();
+    if (!branch || branch === 'HEAD') return null;
 
     const branches = await repository.loadNodes({ types: ['Branch'], scopes: [PROJECT_SCOPE] });
     const previous = branches.find(node => node.id === branchNodeId(branch))?.metadata?.head || null;

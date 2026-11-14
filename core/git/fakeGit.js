@@ -14,7 +14,7 @@ const NO_REPOSITORY = {
     currentBranch: () => null, resolveCommit: () => null, mergeBase: () => null, readBlob: () => null, readBlobBytes: () => null, logRange: () => [], commitList: () => [], countRange: () => null,
     headInfo: () => null, commitInfo: () => null, fileLog: () => [], commitFiles: () => [], listBranches: () => [], listTree: () => null,
     readBlobs: (ref, paths) => new Map(paths.map(file => [file, null])), existsAt: () => false, prefix: () => null, changedSince: () => null,
-    grepRef: () => [], grepRefs: (ref, names) => new Map(names.map(name => [name, []])), lastCommitFor: () => null, conflicts: () => null, worktreeChanges: () => [], ignoredPaths: () => [],
+    grepRef: () => [], grepRefs: (ref, names) => new Map(names.map(name => [name, []])), lastCommitFor: () => null, conflicts: () => null, worktreeChanges: () => [], ignoredPaths: () => null, commitsWithFiles: () => [],
     diffNameStatus: () => { throw new Error('not a git repository'); }
 };
 
@@ -66,6 +66,12 @@ export function createFakeGit(state = null) {
         const before = commit.parents.length ? commits.get(commit.parents[0]).tree : new Map();
         return [...new Set([...before.keys(), ...commit.tree.keys()])].filter(file => before.get(file) !== commit.tree.get(file)).sort();
     };
+    const statusOf = (commit, file) => {
+        const before = commit.parents.length ? commits.get(commit.parents[0]).tree : new Map();
+        if (!before.has(file)) return 'A';
+        return commit.tree.has(file) ? 'M' : 'D';
+    };
+    const withFiles = commit => ({ ...info(commit), files: commit.parents.length > 1 ? [] : changedPaths(commit).map(file => ({ status: statusOf(commit, file), path: file })) });
     const info = commit => commit && { sha: commit.sha, parents: commit.parents, date: commit.date, author: commit.author, subject: commit.subject };
     const short = commit => `${commit.sha.slice(0, 7)} ${commit.subject}`;
     const touching = (commitList, file) => commitList.filter(commit => commit.parents.length < 2 && changedPaths(commit).includes(file));
@@ -102,6 +108,7 @@ export function createFakeGit(state = null) {
         headInfo: () => { const head = commits.get(headSha); return head ? { sha: head.sha, date: head.date, message: head.subject } : null; },
         commitInfo: ref => info(commits.get(resolve(ref))),
         fileLog: (ref, file, { max = 30 } = {}) => { const sha = resolve(ref); return sha ? touching(newestFirst(reachable(sha)), file).slice(0, max).map(info) : []; },
+        commitsWithFiles: (max = 1000) => (headSha ? newestFirst(reachable(headSha)).slice(0, max).map(withFiles) : []),
         commitFiles: (max = 1000) => (headSha ? newestFirst(reachable(headSha)).slice(0, max).map(commit => (commit.parents.length > 1 ? [] : changedPaths(commit))) : []),
         listBranches: () => Object.keys(state.branches).sort(),
         listTree: ref => { const tree = treeOf(ref); return tree ? [...tree.keys()].sort() : null; },

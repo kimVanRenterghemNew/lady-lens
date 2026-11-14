@@ -2,6 +2,7 @@
 import fs from 'fs';
 import path from 'path';
 import { relativeToRepo, resolveInRepo, REPO_ROOT, lensEnv } from '../configuration/index.js';
+import { debugStep } from '../observability/index.js';
 import {
     createGraph,
     asksForDocuments,
@@ -78,7 +79,7 @@ export async function loadGraphModel({ sessionId, text, includeProject, includeD
         return GRAPH_MODEL_CACHE.get(cacheKey);
     }
 
-    const loaded = await repository.loadGraph({ scopes, ...(wantsDocs ? {} : { exclude: { scope: PROJECT_SCOPE, types: ['Document'] } }) });
+    const loaded = await debugStep('query', 'load graph', () => repository.loadGraph({ scopes, ...(wantsDocs ? {} : { exclude: { scope: PROJECT_SCOPE, types: ['Document'] } }) }), result => `${result.nodes.length} nodes, ${result.edges.length} edges`);
     const nodes = loaded.nodes.filter(node => wantsDocs || node.scope !== PROJECT_SCOPE || node.type !== 'Document');
     const kept = new Set(nodes.map(node => node.id));
 
@@ -138,13 +139,13 @@ export async function refreshProjectGraph({ force = false } = {}) {
     }
     try {
         const sync = createGraphSync();
-        const status = await sync.status();
+        const status = await debugStep('freshness', 'status', () => sync.status(), result => (result.stale ? 'stale' : 'fresh'));
         lastFreshnessCheck = Date.now();
         if (!status.stale) {
             lastFreshnessResult = { checked: true, synced: false };
             return lastFreshnessResult;
         }
-        await sync.sync();
+        await debugStep('freshness', 'sync', () => sync.sync());
         invalidateGraphCache();
         lastFreshnessResult = { checked: true, synced: true };
         return lastFreshnessResult;

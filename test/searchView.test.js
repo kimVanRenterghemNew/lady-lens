@@ -86,36 +86,44 @@ The \`processOrder\` workflow handles order validation.
         fs.mkdirSync(path.dirname(fileA), { recursive: true });
         fs.writeFileSync(fileA, `
 class OrderManager {
-    public void Stock() { }
-    public void stockExtra() { }
+    public void Handover() { }
+    public void handoverExtra() { }
 }
 `, 'utf8');
 
         const fileB = path.join(tempDir, 'docs', 'readme.md');
         fs.mkdirSync(path.dirname(fileB), { recursive: true });
-        fs.writeFileSync(fileB, `Mentions Stock in doc.`, 'utf8');
+        fs.writeFileSync(fileB, `Mentions Handover in doc.`, 'utf8');
 
         // 1. Case-sensitive
-        const caseRes = searchView({ query: 'Stock', caseSensitive: true }, { root: tempDir });
+        const caseRes = searchView({ query: 'Handover', caseSensitive: true }, { root: tempDir });
         const allTexts = caseRes.files.flatMap(f => f.matches.map(m => m.text));
-        expect(allTexts.some(t => t.includes('stockExtra'))).toBe(false);
+        expect(allTexts.some(t => t.includes('handoverExtra'))).toBe(false);
 
         // 2. Whole word
-        const wholeRes = searchView({ query: 'Stock', wholeWord: true }, { root: tempDir });
+        const wholeRes = searchView({ query: 'Handover', wholeWord: true }, { root: tempDir });
         const wholeTexts = wholeRes.files.flatMap(f => f.matches.map(m => m.text));
-        expect(wholeTexts.some(t => t.includes('stockExtra'))).toBe(false);
+        expect(wholeTexts.some(t => t.includes('handoverExtra'))).toBe(false);
 
         // 3. Kind filter (only code)
-        const codeOnly = searchView({ query: 'Stock', kind: 'code' }, { root: tempDir });
+        const codeOnly = searchView({ query: 'Handover', kind: 'code' }, { root: tempDir });
         expect(codeOnly.files.some(f => f.kind === 'doc')).toBe(false);
 
         // 4. Include glob filter
-        const includeOnly = searchView({ query: 'Stock', include: 'docs/**' }, { root: tempDir });
+        const includeOnly = searchView({ query: 'Handover', include: 'docs/**' }, { root: tempDir });
         expect(includeOnly.files.every(f => f.file.startsWith('docs/'))).toBe(true);
     });
 
     it('returns error when query is empty or invalid regex', () => {
         expect(searchView({}, { root: tempDir }).error).toContain('query is required');
         expect(searchView({ query: '[invalid', isRegex: true }, { root: tempDir }).error).toContain('invalid pattern');
+    });
+
+    // MCP edge test (2026-11-12): a pattern ending in `$` matched nothing in a CRLF file, the \r stayed on every line
+    it('a regex anchored with $ matches the end of a line in a CRLF file, in searchView and grep', async () => {
+        const { grep } = await import('../core/search/index.js');
+        fs.writeFileSync(path.join(tempDir, 'crlf.js'), 'export const a = 1;\r\nexport const b = 2;\r\n');
+        expect(searchView({ query: 'b = 2;$', isRegex: true }, { root: tempDir }).totalMatches).toBe(1);
+        expect(grep({ pattern: 'b = 2;$' }, { root: tempDir }).matches.map(match => match.line)).toEqual([2]);
     });
 });

@@ -142,6 +142,9 @@ function readByChunkId({ chunkId, graph, relPath }) {
     };
 }
 
+/** How many lines of this file one call returns: the line cap, or fewer when its lines are long. */
+const linesPerCall = (content, count) => Math.max(1, Math.min(MAX_READ_LINES(), Math.floor(MAX_READ_CHARS() / Math.max(1, JSON.stringify(content).length / count))));
+
 export function read_chunk(args = {}) {
     const resolvedArgs = typeof args === 'string' ? { chunkId: args } : (args || {});
     const { chunkId, path: relPath, startLine, endLine, graph } = resolvedArgs;
@@ -171,7 +174,8 @@ export function read_chunk(args = {}) {
         return {
             path: relPath, totalLines: lines.length, truncated: true,
             outline: outlineOf(lines),
-            hint: `File has ${lines.length} lines: read the part you need with startLine/endLine (max ${MAX_READ_LINES()} lines per call), or grep for a symbol.`
+            // the character budget, not the line cap, decides a call in a file with long lines: "max 120" then cost three calls
+            hint: `File has ${lines.length} lines: read the part you need with startLine/endLine (about ${linesPerCall(content, lines.length)} lines of this file per call), or grep for a symbol.`
         };
     }
     const start = Math.max(1, ranged ? (startLine ?? 1) : 1);

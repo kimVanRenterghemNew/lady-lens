@@ -12,10 +12,13 @@ import {
     fileImpact
 } from '../graph/index.js';
 import { loadGraphModel, freshnessFor, readRepoFile, loadCoverage } from './graphModelLoader.js';
+import { placesFor } from './queryPlaces.js';
 import { rankDocuments } from './docMentions.js';
 import { validateQueryArgs, normalizeQueryArgs } from './graphQueryArgs.js';
 
 const IMPORT_QUERY_LIMIT = 5000;
+// a text question gets 20 candidates: the caller's model picks the seam (backlog/zoeken-op-gedrag.md: all 7 cases are in the top 20)
+const TEXT_LIMIT = 20;
 
 function connectEdge(edge, relatedIds) {
     if (String(edge.type).toLowerCase() === 'imports') return;
@@ -87,7 +90,7 @@ function executeGeneralTextQuery(graph, directMatches, limit, kind) {
 }
 
 async function executeTextQuery(graph, text, args) {
-    const limit = args.limit || 10;
+    const limit = args.limit || TEXT_LIMIT;
     const context = await buildContextFromGraph(graph, text, { limit });
     const directMatches = rankGraphNodes(graph, text, { limit, kind: args.kind }).map(e => e.node);
     const result = args.kind === 'doc'
@@ -160,7 +163,8 @@ function buildQueryResponse(loaded, args, sessionId, queryResult, startNode) {
     const impact = buildImpactMap(graph, result.nodes, Boolean(args.node), startNode);
     const nodes = result.nodes.map(match => decorateMatch(match, impact));
     const hop = buildHopInfo(result);
-    return { available: true, sessionId, source, matchCount: result.nodes.length, nodes, edges: result.edges, ...hop, symbols, context, freshness, provenance };
+    const places = args.places && args.query ? placesFor(graph, args.query, result.nodes, { readFile: readRepoFile }) : {};
+    return { available: true, sessionId, source, matchCount: result.nodes.length, nodes, edges: result.edges, ...hop, symbols, ...places, context, freshness, provenance };
 }
 
 async function runQueryWorkflow(loaded, args, sessionId) {

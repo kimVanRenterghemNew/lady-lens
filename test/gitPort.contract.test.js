@@ -26,6 +26,7 @@ const calls = git => ({
     commitInfo: [git.commitInfo('main'), git.commitInfo('f1'), git.commitInfo('nope')],
     fileLog: [git.fileLog('main', 'a.js'), git.fileLog('feature', 'c.js'), git.fileLog('main', 'nope.js'), git.fileLog('main', 'a.js', { max: 1 })],
     commitFiles: [git.commitFiles(), git.commitFiles(2)],
+    commitsWithFiles: [git.commitsWithFiles(), git.commitsWithFiles(2)],
     branches: git.listBranches(),
     tree: [git.listTree('main'), git.listTree('feature'), git.listTree('nope')],
     blobs: [...git.readBlobs('feature', ['a.js', 'c.js', 'nope.js'])],
@@ -100,7 +101,7 @@ describe('git port contract', () => {
         try {
             const probe = git => [git.currentBranch(), git.resolveCommit('HEAD'), git.headInfo(), git.listBranches(), git.listTree('HEAD'), git.commitFiles(), git.changedSince('a', 'b'),
                 git.prefix(), git.grepRef('HEAD', 'x'), [...git.grepRefs('HEAD', ['x'])], git.logRange('a', 'b'), git.countRange('a', 'b'), git.commitInfo('HEAD'), git.fileLog('HEAD', 'a.js'), git.conflicts('a', 'b'),
-                git.readBlob('HEAD', 'a.js'), git.existsAt('HEAD', 'a.js'), [...git.readBlobs('HEAD', ['a.js'])], git.lastCommitFor('a', 'b', 'a.js'), git.mergeBase('a', 'b'), git.worktreeChanges(), git.ignoredPaths()];
+                git.readBlob('HEAD', 'a.js'), git.existsAt('HEAD', 'a.js'), [...git.readBlobs('HEAD', ['a.js'])], git.lastCommitFor('a', 'b', 'a.js'), git.mergeBase('a', 'b'), git.worktreeChanges(), git.ignoredPaths(), git.commitsWithFiles()];
             expect(probe(createFakeGit(null))).toEqual(probe(createGit({ root: empty })));
         } finally { fs.rmSync(empty, { recursive: true, force: true }); }
     });

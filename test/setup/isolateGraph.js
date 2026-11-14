@@ -12,6 +12,8 @@ const temp = workerTempFiles();
 process.env.LENS_GRAPH_DB = temp.graph;
 // Own lens home: daemon.json, the registry and the databases of the developer's running lens are never read or changed.
 process.env.LENS_HOME = temp.home;
+// No background MDL export (a detached lens process per Mendix sync); a test that wants it sets inline or background.
+process.env.LENS_MDL_EXPORT = 'off';
 // Tests use the hand lexicon only, so a generated lexicon file never changes their outcome.
 process.env.LENS_LEXICON_FILE = path.join(os.tmpdir(), 'lens-test-no-generated-lexicon.json');
 try { afterAll(() => removeWorkerTemp(temp)); } catch { process.on('exit', () => removeWorkerTemp(temp)); } // outside a vitest run (setupIsolation spawns this file in plain node)

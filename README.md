@@ -91,6 +91,8 @@ lens remove <id|dir>          # unregister a repository
 lens tools                    # every question and what it answers
 ```
 
+When the daemon runs (`lens mcp -d`), `lens ask` for a registered repository goes through it: the daemon has lady-lens and the graph loaded, so a question costs one HTTP call (about 0.4 s instead of about 1 s). Without a daemon, for a repository it does not serve, or with `--db`, `lens ask` runs the tool itself.
+
 `--repo <dir>` asks about another repo than the current folder; `lens ui --port 5000` picks another port.
 
 The four tabs of the dashboard are one whole: there is one place (tab, file, line) for the page, kept in the URL (`#tab=…&path=…&line=…`), so the browser's Back/Forward, the ◀ ▶ buttons and the crumbs under the tabs step through where you were, and a copied link opens the same place. Every file or function in any tab is a link to it.
@@ -104,6 +106,8 @@ In the dashboard's **Stacktrace** tab you paste a Node, .NET, Python or Java sta
 
 ## Questions
 
+Every tool that returns a list takes `limit`: how many items its main list holds (`graph_query` 20 nodes, `grep` 50 matches, `glob` 200 paths, `importedBy`/`imports`/`exports` 200, `searchView` 100, `diff_impact` 50, `definedIn` 50, `folderView` 40 parts, `functionView` 20 callers, tests and stories, `health` 20 per list, `discussion_query` 10). Without `limit` the default holds; the setting `LENS_<TOOL>_LIMIT` (`LENS_GRAPH_QUERY_LIMIT`, `LENS_IMPORTED_BY_LIMIT`, or `env` in the lens configuration of a repository) changes it. A cut list says so in `truncated` and `limited`. The context budget still caps the whole answer.
+
 | Tool | Answers |
 |---|---|
 | `definedIn` | where a function or name is defined, with lines |
@@ -113,7 +117,7 @@ In the dashboard's **Stacktrace** tab you paste a Node, .NET, Python or Java sta
 | `exports` | what a file exports |
 | `exists` | whether a file exists, and where a file with that name does |
 | `cross_repo_search` | one search over all registered projects, or `repos: [...]`; results per project, unregistered names in `unknown` |
-| `graph_query` | files about a subject; `kind: "doc"` only documentation (for a file path: the documents that name it first, `mentions` and `lines`); `history: true` also superseded decisions; a `node` gets its `consequences` and `risks`, and a one-hop answer says `total` and `truncated` |
+| `graph_query` | files about a subject, 20 candidates by default for a caller or its model to choose from (over the context budget edges, `context` and `provenance` go first, and candidates after the first become `path`, `purpose` and a few `exports`); `kind: "doc"` only documentation (for a file path: the documents that name it first, `mentions` and `lines`); `history: true` also superseded decisions; a `node` gets its `consequences` and `risks`, and a one-hop answer says `total` and `truncated` |
 | `grep`, `glob`, `read_chunk` | text search, paths, and lines of a file, with the same exclusions as the graph |
 | `config_grep` | config-only search, including `.csproj` and reference-manager XML |
 | `config_references` | find which config files reference a package, project, or functional block by name |
@@ -251,7 +255,7 @@ In the two TOML files `lens install` appends a block whose every line ends in `#
 
 One Ladybug database per repository in `~/.lady-lens/repos/<id>/graph.lbdb` (`<id>` = a short hash of the repo path), and a list of every repo in `~/.lady-lens/repos.json`. Nothing is written into the repository itself.
 
-What is indexed: `.js`, `.mjs`, `.cjs` and `.md`, minus `node_modules`, `.git`, `outputs`, `coverage`, `dist`, `build`, `bin`, `obj` and a few more. A repository describes its own in `.lady-lens.yaml` (`project.exclude_dirs`, `project.graph_extensions`).
+What is indexed: source files of every language lens parses (JavaScript, TypeScript, C#, Python, Java, Go, Rust, PHP, Ruby, Kotlin, Swift, C and C++), `.md`, `.sql`, `.ps1` and configuration (`.json`, `.yaml`, `.csproj`, `.sln`), minus `node_modules`, `.git`, `outputs`, `coverage`, `dist`, `build`, `bin`, `obj` and a few more. A repository describes its own in `.lady-lens.yaml` (`project.exclude_dirs`, `project.graph_extensions`). What `.gitignore` leaves out is not indexed either: git says what it ignores, and in a folder git refuses ("dubious ownership") or without git lens reads the `.gitignore` files itself.
 
 Node.js `>=18` is required. Mendix `.mpr` projects are handled through the `mxcli` contributor when `mxcli` is available.
 
@@ -274,26 +278,45 @@ console.log(formatGraphEval(report));
 
 ## Performance
 
-`npm run bench` syncs lady-lens itself into a temporary database and times every operation (full and incremental sync, graph load, `graph_query`, direct queries, `functionView`, `folderView`, `health`), then lists the bottlenecks. `npm run test:perf` runs the same checks as a test with thresholds. Use a change's numbers against this baseline; do not compare runs from different machines.
+Measure first, then optimize: an optimization without numbers before and after is a guess.
 
-Baseline, lady-lens 1.0.7 (226 nodes, 983 edges), 2026-11-02, one run on a development machine:
+```
+npm run bench                          # lady-lens itself, in a temporary database
+npm run bench -- --baseline            # ... and keep it as outputs/bench/baseline.json
+npm run bench:compare                  # the newest run against the baseline: more than 25% slower is a REGRESSION
+npm run bench -- --scale many-imports  # a generated repository: default, small-files, large-files, mixed-languages, many-imports (--count, --seed)
+lens bench --repo C:\git\my-project    # your own repository: temporary database, the registry stays as it is (lens bench compare)
+LENS_PROFILE=1 lens sync               # the phases of one real sync, on stderr
+```
 
-| Operation | Calls | Average |
-| :--- | ---: | ---: |
-| Full sync | 1 | 1605 ms |
-| Incremental sync (unchanged) | 1 | 88 ms |
-| `graph_query` (end to end) | 20 | 108 ms |
-| `health` | 5 | 129 ms |
-| `folderView` | 10 | 71 ms |
-| `functionView` | 10 | 62 ms |
-| Direct queries (`imports`, `importedBy`, `exports`, `definedIn`, `exists`) | 15 each | 24 to 29 ms |
-| `rankGraphNodes` | 50 | 3.3 ms |
-| Graph load, cold / warm | 1 | 88 / 75 ms |
-| `diff_impact` (all functions of one file changed) | 3 | 253 ms |
-| `cross_repo_search` (3 folders) | 3 | 146 ms |
-| `hubs` and `bridges` | 3 | 48 ms |
+Traces: `LENS_TRACE_FILE=<file>` writes one JSON line per span (`trace_id`, `span_id`, `parent_span_id`, `name`, `duration_ms`, `status`, `attributes`), the same shape as Kura's `outputs/traces.jsonl`. A CLI command is the root span (with `node.startup_ms`: Node plus the static imports); below it `load modules`, `tool: <name>`, `freshness: status` and `freshness: sync`, `query: load graph` and every step of a sync. In the daemon each tool call is its own trace. A caller that sets `TRACEPARENT` (W3C, `00-<trace id>-<span id>-01`) gets lens's spans in its own trace; point `LENS_TRACE_FILE` at the caller's file to see them together.
 
-For a large repository, `scripts/lens-scale.mjs` generates one.
+```
+$env:LENS_TRACE_FILE = "$HOME\.lady-lens\logs\traces.jsonl"; lens ask graph_query '{"query":"queue"}'
+```
+
+Every measurement runs once to warm up and then 5 times (`--runs`). The run shows the median, min, max and the spread, and marks a measurement whose runs differ more than 10% as `unstable`. A full or incremental sync is split into its phases: stored files, scan (with read and hash), parse (per file type), contributors, Mendix, co-change from git, derive relations, write to the graph, record head. `process: lens ask` and `process: daemon start` time a new process from start to answer. Each run is saved as `outputs/bench/<date>-<commit>.json` (for `lens bench`: `~/.lady-lens/bench/<repo id>/`), with the numbers, the lady-lens version, Node, OS, CPU and a hash of the machine; no paths or code of the measured repository. A comparison between two machines or two repositories gives a warning.
+
+`npm run check` ends with `npm run test:perf`: the performance tests alone (no coverage, no parallel workers, where a time swung 5x), each measurement held to a budget in `test/perf-budgets.json`. The budgets leave 5x room for a slower or busy machine (CI runs the same step), so they catch a large slowdown; a slowdown of 25% shows in `npm run bench:compare` on your own machine. After a speed-up, `npm run bench:ratchet` makes the budgets stricter; it never loosens one.
+
+Baseline, lady-lens 1.5.2 (349 files, 350 nodes), 2026-11-12, median of 5 runs on a development machine (Windows, 16 x i7-11850H, Node 24):
+
+| Operation | Median |
+| :--- | ---: |
+| Full sync (parse 59%, write to graph 29%) | 3381 ms |
+| Incremental sync (unchanged) | 193 ms |
+| Graph load, cold / warm | 125 / 127 ms |
+| `graph_query` (end to end) | 197 ms |
+| `functionView` / `folderView` | 50 / 148 ms |
+| Direct queries (`definedIn`, `exports`, `imports`, `importedBy`, `exists`) | 26 to 37 ms |
+| `health` | 157 ms |
+| `diff_impact` (all functions of one file changed) | 204 ms |
+| `cross_repo_search` (3 folders) | 74 ms |
+| `hubs` and `bridges` | 17 ms |
+| `rankGraphNodes` | 4.6 ms |
+| `lens ask` as a new process / daemon start | 854 / 677 ms |
+
+A generated repository (`npm run bench -- --scale many-imports`: 1000 source files with 12 imports each, plus tests and documents, 1260 files, seed 1), same machine, median of 3 runs: full sync 6255 ms, of which writing to the graph 5222 ms (83%); incremental sync 285 ms; graph load 564 ms; `graph_query` 576 ms; `folderView` 620 ms; `health` 666 ms; `functionView` 57 ms. Writing to the graph is where a large sync spends its time.
 
 ## Settings & Configuration
 
@@ -321,7 +344,7 @@ lady-lens can be configured fully through a **`config.json`** file in the root o
 }
 ```
 
-Settings can also be overridden with the environment variables `LENS_<NAME>`: `LENS_GRAPH_DB`, `LENS_REPO_ROOT`, `LENS_SETTINGS_PATH`, `LENS_TOOL_RESULT_CHARS`, `LENS_READ_CHUNK_MAX_CHARS`, `LENS_READ_CHUNK_MAX_LINES`, `LENS_GREP_MAX_MATCHES`, `LENS_DEBUG_LOG_FILE`, `LENS_DEBUG_LEVEL`.
+Settings can also be overridden with the environment variables `LENS_<NAME>`: `LENS_GRAPH_DB`, `LENS_REPO_ROOT`, `LENS_SETTINGS_PATH`, `LENS_TOOL_RESULT_CHARS`, `LENS_READ_CHUNK_MAX_CHARS`, `LENS_READ_CHUNK_MAX_LINES`, `LENS_GREP_MAX_MATCHES`, `LENS_DEBUG_LOG_FILE`, `LENS_DEBUG_LEVEL`, `LENS_MDL_EXPORT` (`background` default, `inline`, `off`: the Mendix MDL export after a model change), `LENS_MXCLI_TIMEOUT_MS` (time limit of one mxcli call, default 120000).
 
 ## As a library (NPM Package)
 

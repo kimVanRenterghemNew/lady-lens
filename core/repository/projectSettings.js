@@ -23,7 +23,13 @@ const DEFAULT_SETTINGS = {
     project: {
         exclude_dirs: ['.git', '.memory', 'node_modules', 'outputs', 'coverage', 'dist', 'build', 'target', '.vs', '.idea'],
         graph_roots: ['.'],
-        graph_extensions: ['.js', '.mjs', '.ts', '.jsx', '.tsx', '.cs', '.csproj', '.sln', '.sql', '.ps1', '.md', '.yaml', '.yml', '.json', '.reference']
+        // every programming language lens parses (test/graphExtensions.internal.test.js); before 2026-11-13 a Python, Java
+        // or Go repository was not indexed at all. Styling and markup (.css, .html) stay out: much text, little behaviour
+        graph_extensions: [
+            '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.cs', '.py', '.java', '.go', '.rs', '.php', '.rb', '.kt', '.kts', '.swift',
+            '.c', '.cc', '.cpp', '.cxx', '.h', '.hpp',
+            '.csproj', '.sln', '.sql', '.ps1', '.md', '.yaml', '.yml', '.json', '.reference'
+        ]
     },
     graph: {
         freshness: { default_max_age_days: 30 },
@@ -115,11 +121,21 @@ export function isGraphExtension(filePath, extensions = DEFAULT_SETTINGS.project
 
 export const _private = { DEFAULT_SETTINGS, mergeSettings, settingsPath };
 
+/** Folders lens writes for grep/glob/read_chunk: the MDL text of a Mendix model (core/graph/sync/mendixExport.js). */
+const SEARCHED_ALWAYS = ['.mxcli/mdl/'];
+
 /**
  * ONE rule for what is searchable, shared by the graph sync, grep/glob and the directory view of /discuss
  * (each had its own list before). Reads the settings once; the returned function judges repo-relative paths.
+ * `ignored`: what git ignores (`git.ignoredPaths()`, a folder ends in '/'), as the graph sync leaves it out: grep and
+ * searchView found every match twice in an ignored copy of the repository (evals/.workspace/).
  */
-export function createSearchExcluder(settings = loadProjectSettingsSync()) {
+export function createSearchExcluder(settings = loadProjectSettingsSync(), ignored = []) {
     const excludeDirs = settings.project?.exclude_dirs || [];
-    return (relativePath) => shouldExcludePath(relativePath, excludeDirs);
+    const ignoredFiles = new Set(ignored.filter(entry => !entry.endsWith('/')));
+    const ignoredDirs = ignored.filter(entry => entry.endsWith('/'));
+    // what lens writes to be searched stays searchable, also when git ignores its folder (.mxcli/ in a Mendix project)
+    const kept = file => SEARCHED_ALWAYS.some(dir => `${file}/`.startsWith(dir) || dir.startsWith(`${file}/`));
+    const isIgnored = file => !kept(file) && (ignoredFiles.has(file) || ignoredDirs.some(dir => `${file}/`.startsWith(dir)));
+    return (relativePath) => shouldExcludePath(relativePath, excludeDirs) || isIgnored(normalizeRelativePath(relativePath));
 }

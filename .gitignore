@@ -10,3 +10,6 @@ scratch/
 .env
 .env.*
 *.log
+
+# evals and fixtures from customer repositories: never pushed
+localtests/

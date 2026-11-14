@@ -23,5 +23,10 @@ export function entityFor(file, source, { stamp, entryPoints, settings }) {
     return entity;
 }
 
-/** Dependency nodes for the references of these files (entities or stored infos with `metadata`). */
-export const dependencyNodesOf = (infos, stamp) => [...infos].flatMap(info => (info.metadata?.references || []).map(reference => buildDependencyEntity(reference, { now: stamp })));
+/**
+ * Dependency nodes for the references of these files (entities or stored infos with `metadata`), one per package: every
+ * .csproj that names the same package made its own copy (8,415 nodes written for 3,747 in a C# solution).
+ */
+export const dependencyNodesOf = (infos, stamp) => [...new Map([...infos]
+    .flatMap(info => (info.metadata?.references || []).map(reference => buildDependencyEntity(reference, { now: stamp })))
+    .map(node => [node.id, node])).values()];

@@ -1,0 +1,24 @@
+{
+  "about": "Behaviour questions (backlog/zoeken-op-gedrag.md): a question in plain language, the repository at the commit BEFORE the change, the file where the change belongs. Pass: that file in the top 3 of graph_query. Cases from the Kura session, 2026-11-11.",
+  "repo": "C:/git/tmp/Kura",
+  "top": 3,
+  "lexicon": "configs/lexicon.generated.json",
+  "cases": [
+    { "id": "26.10-input-without-question", "kind": "code", "commit": "8f35af8", "expected": ["core/handlers/commandRouter.js"],
+      "query": "Een losse y of n die de operator typt terwijl er geen vraag openstaat, mag geen werk starten en niet naar het persona-board gaan; Kura zegt dat er geen vraag open staat, zonder modelcall." },
+    { "id": "26.4-chat-knows-the-queue", "kind": "code", "commit": "c784ba3", "expected": ["core/pipelines/discussPipeline.js"],
+      "query": "Een vraag in de chat over wat er in de wachtrij staat of wat een taak doet, krijgt een kort antwoord dat klopt met de werkelijke taken; nu zegt de chat nee terwijl er taken zijn." },
+    { "id": "26.12-one-persona-answers", "kind": "code", "commit": "a6b6df4", "expected": ["core/pipelines/discussPipeline.js"],
+      "query": "Een vraag in de discussie krijgt één antwoord van de best passende persona, niet twee personas die hetzelfde herhalen en twee keer op het model laten wachten." },
+    { "id": "27.8-one-story-per-command", "kind": "code", "commit": "a6b6df4", "expected": ["core/domain/planning/review/storyReview.js"],
+      "query": "Een plan voor één commando toont één story; integreren of valideren van dat commando worden acceptatiecriteria in die story, geen aparte stories." },
+    { "id": "26.1-limit-model-threads", "kind": "code", "commit": "1c93150", "expected": ["core/agents/modelSelection/ollama/ollamaHttp.js", "core/agents/modelSelection/ollama/ollamaContext.js"],
+      "query": "Tijdens plannen of coderen bevriest de laptop omdat het lokale model alle CPU-threads neemt; het aantal threads moet begrensd en instelbaar zijn." },
+    { "id": "docs-only-story-template", "kind": "all", "commit": "8f35af8", "expected": ["backlog/STORY_TEMPLATE.md", "docs/project-conventions.md"], "refuseCode": true,
+      "query": "Waar staat beschreven hoe een story eruitziet en welke velden verplicht zijn?" },
+    { "id": "keep-the-queue-safe", "kind": "code", "commit": "b4bfd1f", "expected": ["core/domain/planning/queue/workQueue.js"],
+      "query": "bewaar de wachtrij veilig" },
+    { "id": "5abc4a1-task-ids-with-slugs", "kind": "code", "commit": "073a9d3", "expected": ["core/agents/routing/modeClassifier.js"],
+      "query": "echte plan-id's (met slugs) worden als taakverwijzing herkend\n\nTests:\n- Given the full id with slugs and an execute verb Then execute, with the WHOLE id\n- a question about that id stays discuss (25.0), with the whole id as the reference\n- the bare forms keep working\n- a story id without a task part is no task reference" }
+  ]
+}

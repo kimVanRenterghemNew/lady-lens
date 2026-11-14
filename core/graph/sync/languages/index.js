@@ -153,7 +153,9 @@ export function analyzeSourceForLanguage(source, extOrPath) {
             parseError: null
         };
     }
-    return extractWithConfig(source, config, extOrPath);
+    // each language knows its own tests (tests/test_x.py, *_test.go, src/test/, [Fact]); the leading slash lets a
+    // folder rule match at the root. Before 2026-11-13 only JavaScript tests were told apart from code.
+    return { ...extractWithConfig(source, config, extOrPath), isTest: Boolean(config.isTestFile?.(`/${String(extOrPath).replace(/\\/g, '/')}`, source)) };
 }
 
 export {

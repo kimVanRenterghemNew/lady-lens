@@ -8,7 +8,7 @@
 import fs from 'fs';
 import { REPO_ROOT, relativeToRepo } from '../configuration/index.js';
 import { isCodeFile, isDocFile, isConfigFile } from '../graph/sync/index.js';
-import { walkFiles, globToRegExp } from './grepSearch.js';
+import { walkFiles, globToRegExp, clipLine } from './grepSearch.js';
 
 const isTestPath = (p) => /(?:^|[\\/])(?:tests?|__tests?__)[\\/]|[.](?:test|spec|Tests?)[.][a-z0-9]+$/i.test(p);
 const fileKindOf = (rel) => isTestPath(rel) ? 'test' : isDocFile(rel) ? 'doc' : isConfigFile(rel) ? 'config' : isCodeFile(rel) ? 'source' : 'other';
@@ -19,10 +19,15 @@ function buildMatcher(query, { caseSensitive, wholeWord, isRegex }) {
     return new RegExp(pat, caseSensitive ? 'g' : 'gi');
 }
 
-function classifyLine(line, query, fileKind) {
-    if (fileKind === 'doc') return 'doc';
-    if (fileKind === 'test') return 'test';
-    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const FILE_MATCH_KIND = { doc: 'doc', test: 'test' };
+
+/** `name` is the text that matched, not the query: a regex query (`a|b`) escaped as a name never looked like a definition. */
+function classifyLine(line, name, fileKind) {
+    return FILE_MATCH_KIND[fileKind] || (/^[\w$.]+$/.test(name) ? codeMatchKind(line, name) : 'reference');
+}
+
+function codeMatchKind(line, name) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const defPattern = new RegExp(`(?:class|interface|struct|record|enum|function|fn|def)\\s+${escaped}\\b|(?:public|private|protected|internal|static|async|void)\\s+[^;={}]*\\b${escaped}\\s*\\(`, 'i');
     if (defPattern.test(line)) return 'definition';
     const callPattern = new RegExp(`\\b${escaped}\\s*\\(`, 'i');
@@ -30,23 +35,24 @@ function classifyLine(line, query, fileKind) {
     return 'reference';
 }
 
-function matchLine(line, i, regex, queryTrimmed, fKind) {
+function matchLine(line, i, regex, fKind) {
     regex.lastIndex = 0;
-    if (!regex.test(line)) return null;
-    const matchKind = classifyLine(line, queryTrimmed, fKind);
+    const found = regex.exec(line);
+    if (!found) return null;
+    const matchKind = classifyLine(line, found[0], fKind);
     return {
         line: i + 1,
-        text: line.trim(),
+        text: clipLine(line, regex),
         kind: matchKind,
-        ...(matchKind === 'definition' ? { symbol: queryTrimmed } : {})
+        ...(matchKind === 'definition' ? { symbol: found[0] } : {})
     };
 }
 
-function collectFileMatches(content, regex, queryTrimmed, fKind, state, limit) {
-    const lines = content.split('\n');
+function collectFileMatches(content, regex, fKind, state, limit) {
+    const lines = content.split(/\r?\n/); // CRLF: a \r left on the line made `$` in a regex match nothing
     const matches = [];
     for (let i = 0; i < lines.length && state.totalCount < limit; i++) {
-        const match = matchLine(lines[i], i, regex, queryTrimmed, fKind);
+        const match = matchLine(lines[i], i, regex, fKind);
         if (match) {
             state.totalCount++;
             matches.push(match);
@@ -82,7 +88,7 @@ export function searchView(args = {}, { root = REPO_ROOT } = {}) {
 
         let content;
         try { content = fs.readFileSync(absPath, 'utf8'); } catch { return; }
-        const matches = collectFileMatches(content, regex, query.trim(), fKind, state, limit);
+        const matches = collectFileMatches(content, regex, fKind, state, limit);
 
         if (matches.length > 0) {
             fileMatches.push({

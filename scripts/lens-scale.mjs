@@ -4,70 +4,28 @@
  * Generates a synthetic repository of N files, runs sync and queries,
  * verifies correctness, and measures performance.
  *
- * Usage: node scripts/lens-scale.mjs [count] [--keep]
+ * Usage: node scripts/lens-scale.mjs [count] [--profile <name>] [--seed <n>] [--keep]
+ * Profiles: see SCALE_PROFILES in core/bench/scaleRepo.js.
  */
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-const count = Number(process.argv[2]) || 500;
+import { generateScaleRepo, SCALE_PROFILES } from '../core/bench/index.js';
+
+const flagValue = name => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : null; };
+const profile = flagValue('--profile') || 'default';
+const seed = Number(flagValue('--seed')) || 1;
+const count = Number(process.argv[2]) || SCALE_PROFILES[profile]?.count || 500;
 const keep = process.argv.includes('--keep');
 
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `lens-scale-${count}-`));
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `lens-scale-${profile}-${count}-`));
 const dbDir = path.join(tmpDir, '.memory', 'graph');
 const dbPath = path.join(dbDir, 'project.lbdb');
 
-console.log(`Generating synthetic repo with ${count} files at ${tmpDir}...`);
-
+console.log(`Generating synthetic repo (${profile}, seed ${seed}) with ${count} files at ${tmpDir}...`);
 const t0Gen = Date.now();
-const FILES_PER_MODULE = 50;
-const numModules = Math.ceil(count / FILES_PER_MODULE);
-
-function writeModuleTest(tmpDir, m, f) {
-    if (f % 5 !== 0) return;
-    const testDir = path.join(tmpDir, 'test', `mod_${m}`);
-    fs.mkdirSync(testDir, { recursive: true });
-    const testContent = `import { describe, it } from 'vitest';
-import { func_${m}_${f} } from '../../src/mod_${m}/file_${f}.js';
-
-describe('mod_${m}_file_${f}', () => {
-    it('works', () => {
-        func_${m}_${f}();
-    });
-});
-`;
-    fs.writeFileSync(path.join(testDir, `file_${f}.test.js`), testContent, 'utf8');
-}
-
-function writeModuleDoc(tmpDir, m, f) {
-    if (f % 20 !== 0) return;
-    const docDir = path.join(tmpDir, 'docs');
-    fs.mkdirSync(docDir, { recursive: true });
-    fs.writeFileSync(path.join(docDir, `doc_${m}_${f}.md`), `# Document for mod_${m} file_${f}\n\nDetails about func_${m}_${f}.\n`, 'utf8');
-}
-
-let fileCount = 0;
-for (let m = 0; m < numModules && fileCount < count; m++) {
-    const modDir = path.join(tmpDir, 'src', `mod_${m}`);
-    fs.mkdirSync(modDir, { recursive: true });
-
-    for (let f = 0; f < FILES_PER_MODULE && fileCount < count; f++) {
-        fileCount++;
-        const targetMods = [...new Set([(m + 1) % numModules, (m + 2) % numModules])].filter(other => other !== m);
-        const importsCode = targetMods.map(other => `import { func_${other}_0 } from '../mod_${other}/file_0.js';`).join('\n');
-        const content = `// Module ${m} file ${f}
-${importsCode}
-
-export function func_${m}_${f}() {
-    return 'func_${m}_${f}';
-}
-`;
-        fs.writeFileSync(path.join(modDir, `file_${f}.js`), content, 'utf8');
-        writeModuleTest(tmpDir, m, f);
-        writeModuleDoc(tmpDir, m, f);
-    }
-}
-
+const { files: fileCount } = generateScaleRepo({ dir: tmpDir, profile, count, seed });
 console.log(`Generated ${fileCount} files in ${Date.now() - t0Gen} ms.`);
 
 // Configure lady-lens
@@ -107,13 +65,13 @@ console.log(`Incremental sync (unchanged) in ${incTimeMs} ms.`);
 
 // 3. Measure Queries
 const queries = [
-    { tool: 'definedIn', args: { symbol: 'func_0_0' }, check: res => res.locations?.[0]?.path === 'src/mod_0/file_0.js' },
-    { tool: 'exports', args: { file: 'src/mod_0/file_0.js' }, check: res => res.names?.includes('func_0_0') },
+    { tool: 'definedIn', args: { symbol: 'func_0_0_0' }, check: res => res.locations?.[0]?.path === 'src/mod_0/file_0.js' },
+    { tool: 'exports', args: { file: 'src/mod_0/file_0.js' }, check: res => res.names?.includes('func_0_0_0') },
     { tool: 'exists', args: { file: 'src/mod_0/file_0.js' }, check: res => res.exists === true },
-    { tool: 'imports', args: { file: 'src/mod_0/file_0.js' }, check: res => res.files?.length >= (numModules > 2 ? 2 : 1) },
+    { tool: 'imports', args: { file: 'src/mod_0/file_0.js' }, check: res => Array.isArray(res.files) },
     { tool: 'importedBy', args: { file: 'src/mod_0/file_0.js' }, check: res => Array.isArray(res.files) },
-    { tool: 'functionView', args: { symbol: 'func_0_0' }, check: res => res.definitions?.[0]?.path === 'src/mod_0/file_0.js' },
-    { tool: 'graph_query', args: { query: 'func_0_0' }, check: res => res.nodes?.length > 0 || res.symbols?.length > 0 }
+    { tool: 'functionView', args: { symbol: 'func_0_0_0' }, check: res => res.definitions?.[0]?.path === 'src/mod_0/file_0.js' },
+    { tool: 'graph_query', args: { query: 'func_0_0_0' }, check: res => res.nodes?.length > 0 || res.symbols?.length > 0 }
 ];
 
 console.log('\n--- Benchmarking Queries ---');

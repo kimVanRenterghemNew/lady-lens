@@ -7,6 +7,7 @@ export { configureLensContributors } from './contributors.js';
 export { deriveDocumentRelations } from './documentRelations.js';
 export { analyzeSource, fileKindOf, configFilesNamed, DEFAULT_SCRIPT_PATHS } from './codeFacts.js';
 export { extractFunctionComplexities, extractCallbackComplexities, computeFunctionMetrics } from './functionComplexity.js';
-export { findMendixProject, mendixContributor, mendixChanged } from './mendix.js';
+export { findMendixProject, mendixContributor, mendixChanged, runMdlExport, startMdlExport } from './mendix.js';
 export { detectFunctionSmells, detectFileSmells, DESIGN_ADVICE, adviceFor } from './designSmells.js';
 export { analyzeSourceForLanguage, isLanguageSupported, configForExtension, isCodeFile, isDocFile, isConfigFile, CODE_EXTENSIONS, DOC_EXTENSIONS, CONFIG_EXTENSIONS } from './languages/index.js';
+export { commentWordsOf } from './commentWords.js';

@@ -46,6 +46,17 @@ export function activateRepoContext(repoTarget) {
     process.env.LENS_PROJECT_GRAPH = '1';
 }
 
+/**
+ * A registered repo, or an existing folder; else an error. resolveRepoTarget invents a target for any path: a typo in
+ * `repo` answered "not found" from an empty graph and left an empty database folder behind.
+ */
+function knownRepo(hint) {
+    const target = findRegisteredRepo(hint) ?? (isDirectory(hint) ? resolveRepoTarget(hint) : null);
+    if (!target) throw new Error(`repository not registered and no folder: ${hint}. See repo_list, or add it with repo_add.`);
+    return target;
+}
+const isDirectory = (hint) => { try { return fs.statSync(path.resolve(hint)).isDirectory(); } catch { return false; } };
+
 // The active repo lives in process-wide state, so tool calls for different repos must not interleave.
 let repoLockChain = Promise.resolve();
 function withRepoLock(fn) {
@@ -94,8 +105,7 @@ export function createLadyLensMcpServer({ defaultRepo = process.cwd() } = {}) {
 
     function syncRepoContext(args, name, fallbackRepo) {
         if (args.repo && name !== 'repo_remove') {
-            const target = resolveRepoTarget(args.repo);
-            if (target) activateRepoContext(target);
+            activateRepoContext(knownRepo(args.repo));
             delete args.repo;
             return;
         }

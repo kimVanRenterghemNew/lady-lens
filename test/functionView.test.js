@@ -46,7 +46,8 @@ describe('functionView', () => {
     it('gives the definition with lines, the purpose, both callers, the test and the story, and nothing else', () => {
         const view = functionView(fixture(), 'applyAnswers', { readFile });
         expect(view.found).toBe(true);
-        expect(view.definitions).toEqual([{ path: 'core/q/questions.js', startLine: 1, endLine: 3, purpose: 'Questions at needs_human' }]);
+        // purpose is the doc of the function itself (none here); the file's purpose is filePurpose (Kura 2026-11-12)
+        expect(view.definitions).toEqual([{ path: 'core/q/questions.js', startLine: 1, endLine: 3, purpose: null, filePurpose: 'Questions at needs_human' }]);
         expect(view.callers.map(c => c.path)).toEqual(['core/h/handler.js', 'core/h/second.js']);
         // 2026-10-29: the call line only, no longer the import line (parsed call sites instead of name matches).
         expect(view.tests).toEqual([{ path: 'test/questions.test.js', lines: [2], names: ['applyAnswers skips a command'] }]);
@@ -61,6 +62,19 @@ describe('functionView', () => {
             { path: 'core/h/handler.js', lines: [2], functions: ['run'] },
             { path: 'core/h/second.js', lines: [2], reference: true }
         ]);
+    });
+
+    // Kura (2026-11-12): sorted by path, backlog references came before the CLI main loop that calls routeInput, and
+    // the context budget (cut from the end) dropped that real caller
+    it('lists the proven callers before the references, also when a reference sorts first by path', () => {
+        const graph = fixture();
+        FILES['a/early.js'] = "import { applyAnswers } from '../core/q/index.js';\nconst keep = applyAnswers;\n";
+        graph.addNode('file:a/early.js', 'CodeFile', { path: 'a/early.js', kind: 'source' });
+        graph.addEdge('file:a/early.js', 'file:core/q/index.js', 'IMPORTS', 1);
+        try {
+            expect(functionView(graph, 'applyAnswers', { readFile }).callers.map(c => `${c.path}${c.reference ? ' ref' : ''}`))
+                .toEqual(['core/h/handler.js', 'a/early.js ref', 'core/h/second.js ref']);
+        } finally { delete FILES['a/early.js']; }
     });
 
     it('lists what X calls, resolved through barrels to the defining file, with the call lines', () => {

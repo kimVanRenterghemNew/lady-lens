@@ -1,4 +1,5 @@
 export { scanGraphFiles, inGraphScope } from './projectScanner.js';
+export { gitignoredPaths } from './gitignoreRules.js';
 export { loadProjectSettings, loadProjectSettingsSync, normalizeRelativePath, shouldExcludePath, isGraphExtension, createSearchExcluder } from './projectSettings.js';
 export {
     LENS_HOME,

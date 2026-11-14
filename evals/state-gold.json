@@ -1,0 +1,20 @@
+{
+  "about": "States a request names (backlog/toestand-in-de-code.md): graph_query with places: true must give the function where the code knows that state, with the line inside its range, in the top 3; a refuse case must give no place. Cases from the Kura session, 2026-11-12, in Dutch and in English.",
+  "repo": "C:/git/tmp/Kura",
+  "top": 3,
+  "lexicon": "configs/lexicon.generated.json",
+  "cases": [
+    { "id": "1-nl-no-open-question", "commit": "8f35af8", "query": "terwijl er geen vraag openstaat", "path": "core/cli/dispatch.js", "lines": [35, 46] },
+    { "id": "1-en-no-open-question", "commit": "8f35af8", "query": "while no question is open", "path": "core/cli/dispatch.js", "lines": [35, 46] },
+    { "id": "2-nl-queue-empty", "commit": "01c4c12", "query": "als de wachtrij leeg is", "path": "core/domain/planning/queue/workQueue.js", "function": "pull", "lines": [91] },
+    { "id": "2-en-queue-empty", "commit": "01c4c12", "query": "when the queue is empty", "path": "core/domain/planning/queue/workQueue.js", "function": "pull", "lines": [91] },
+    { "id": "3-nl-queue-paused", "commit": "01c4c12", "query": "als de wachtrij gepauzeerd is", "path": "core/domain/planning/queue/workQueue.js", "function": "pull", "lines": [90] },
+    { "id": "3-en-queue-paused", "commit": "01c4c12", "query": "while the queue is paused", "path": "core/domain/planning/queue/workQueue.js", "function": "pull", "lines": [90] },
+    { "id": "4-nl-task-still-running", "commit": "01c4c12", "query": "een taak die nog bezig was toen Kura stopte", "path": "core/domain/planning/queue/workQueue.js", "function": "recoverInterrupted", "lines": [123] },
+    { "id": "4-en-task-still-running", "commit": "01c4c12", "query": "a task that was still running when Kura stopped", "path": "core/domain/planning/queue/workQueue.js", "function": "recoverInterrupted", "lines": [123] },
+    { "id": "5-nl-after-failed-attempt", "commit": "01c4c12", "query": "na een mislukte poging", "path": "core/domain/testing/codeVerificationLoop.js", "function": "runCodeVerificationLoop", "lines": [70] },
+    { "id": "5-en-after-failed-attempt", "commit": "01c4c12", "query": "after a failed attempt", "path": "core/domain/testing/codeVerificationLoop.js", "function": "runCodeVerificationLoop", "lines": [70] },
+    { "id": "6-nl-refuse-logged-in", "commit": "01c4c12", "query": "als de gebruiker is ingelogd", "refuse": true },
+    { "id": "6-en-refuse-logged-in", "commit": "01c4c12", "query": "when the user is logged in", "refuse": true }
+  ]
+}

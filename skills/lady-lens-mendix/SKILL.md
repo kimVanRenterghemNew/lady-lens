@@ -5,9 +5,12 @@ description: Use for Mendix projects (a folder with a .mpr file): find pages, wi
 
 # Mendix with Lady-lens
 
-A Mendix model lives in the binary `.mpr`; plain text search does not see it. `lens sync` asks `mxcli` for the MDL text of
-every document and writes it to `.mxcli/mdl/<Module>/<Name>.<type>.mdl` (type: page, snippet, microflow, nanoflow,
-entity, enumeration, ...). Lady-lens tools search those files like code.
+A Mendix model lives in the binary `.mpr`; plain text search does not see it. After a change to the model, `lens sync` starts
+a background export that asks `mxcli` for the MDL text of every document and writes it to
+`.mxcli/mdl/<Module>/<Name>.<type>.mdl` (type: page, snippet, microflow, nanoflow, entity, enumeration, ...). The sync does
+not wait for it: on a big project the export takes minutes. `.mxcli/lens-mdl.json` says when the last export finished
+(`finishedAt`, `documents`); while `.mxcli/lens-mdl.lock` exists one is running and the text may be one save behind.
+Lady-lens tools search those files like code.
 
 ## Find
 

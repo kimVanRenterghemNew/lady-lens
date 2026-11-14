@@ -17,13 +17,13 @@ import { deriveProjectRelations } from './projectRelations.js';
 import { isCodeFile, isDocFile, isConfigFile } from './languages/index.js';
 import { mendixContributor, mendixChanged } from './mendix.js';
 import { contributed } from './contributors.js';
-import { debugStep } from '../../observability/index.js';
+import { debugStep, globalProfiler } from '../../observability/index.js';
 const toPosix = (value) => String(value).replace(/\\/g, '/');
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 export const isProjectGraphEnabled = (env = process.env) => lensEnv('PROJECT_GRAPH', env) !== '0';
 const isIndexable = (file) => isCodeFile(file) || isDocFile(file) || isConfigFile(file);
-/** Bumped when the facts of a file gain a field or its kind is judged differently (8: x.config.* is a script; 9: complexity counted as ESLint does, callbacks): every file is then re-read once, also when its content did not change. */
-export const FACTS_VERSION = 9;
+/** Bumped when the facts of a file gain a field or its kind is judged differently (8: x.config.* is a script; 9: complexity counted as ESLint does, callbacks; 10: commentWords): every file is then re-read once, also when its content did not change. */
+export const FACTS_VERSION = 11;
 const FILE_TYPES = new Set(['CodeFile', 'Document', 'Config']);
 /**
  * @param {{root?: string, repository?: object, settings?: object, now?: () => number, contribute?: boolean}} [options]
@@ -49,8 +49,9 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
                     const stat = `${info.size}:${Math.round(info.mtimeMs)}`;
                     const before = known?.get(file);
                     if (before?.hash && before.metadata?.stat === stat && before.metadata?.facts === FACTS_VERSION) { found.set(file, { source: null, hash: before.hash, stat }); return; }
+                    const stop = globalProfiler.startTimer('sync: scan > read and hash');
                     const source = fs.readFileSync(absolutePath, 'utf8');
-                    found.set(file, { source, hash: sha256(source), stat });
+                    found.set(file, { source, hash: sha256(source), stat }); stop();
                 } catch { /* unreadable file: treated as absent */ }
             }
         });
@@ -88,17 +89,16 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
         let packageJson = '';
         try { packageJson = fs.readFileSync(path.join(root, 'package.json'), 'utf8'); } catch { /* none */ }
         const entryPoints = entryPointsFrom(packageJson);
-        const upserts = await debugStep('sync', `parse ${filesToIndex.length} files`, () => filesToIndex.map(file => {
+        const upserts = await debugStep('sync', 'parse', () => filesToIndex.map(file => {
+            const stop = globalProfiler.startTimer(`sync: parse > ${path.extname(file) || path.basename(file)}`);
             try {
                 const entity = entityFor(file, current.get(file).source, { stamp, entryPoints, settings: resolvedSettings });
                 entity.metadata = { ...entity.metadata, facts: FACTS_VERSION, ...(current.get(file).stat ? { stat: current.get(file).stat } : {}) };
-                return entity;
+                stop(); return entity;
             } catch (err) {
-                const e = new Error(`Fout bij verwerken van '${file}': ${err.message}`);
-                e.cause = err;
-                throw e;
+                throw Object.assign(new Error(`Fout bij verwerken van '${file}': ${err.message}`), { cause: err });
             }
-        }), list => `${list.reduce((sum, entity) => sum + (entity.metadata?.functions?.length || 0), 0)} functions`);
+        }), list => `${list.length} files, ${list.reduce((sum, entity) => sum + (entity.metadata?.functions?.length || 0), 0)} functions`);
         const merged = new Map(known);
         for (const file of removed) merged.delete(file);
         for (const entity of upserts) merged.set(entity.path, { id: entity.id, type: entity.type, kind: entity.kind, hash: entity.contentHash, metadata: entity.metadata });
@@ -114,8 +114,8 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
         const fresh = new Set(nodes.map(node => node.path));
         const removePaths = [...removed, ...contributedPaths.filter(key => !fresh.has(key))];
         const relations = await debugStep('sync', 'derive relations', () => [...deriveProjectRelations(merged, stamp), ...coChange, ...extra.relations, ...mendix.relations], list => `${list.length} relations`);
-        return debugStep('sync', `write to graph (${nodes.length} nodes, ${relations.length} relations, ${removePaths.length} removed paths, db ${repository.databasePath()})`,
-            () => repository.applyProjectChanges({ upserts: nodes, removePaths, relations }), totals => JSON.stringify(totals));
+        return debugStep('sync', 'write to graph', () => repository.applyProjectChanges({ upserts: nodes, removePaths, relations }),
+            totals => `${nodes.length} nodes, ${relations.length} relations, ${removePaths.length} removed paths, db ${repository.databasePath()}: ${JSON.stringify(totals)}`);
     }
     const api = {
         repository,
@@ -140,15 +140,15 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
         /** Bring the project scope up to date and record branch and commit (`branch`, `commit`, `commitsSince`). */
         async sync(options = {}) {
             const result = await api.syncFiles(options);
-            const head = await recordHead({ repository, git, wrote: result.wrote !== false, now: new Date(now()).toISOString() });
+            const head = await debugStep('sync', 'record head', () => recordHead({ repository, git, wrote: result.wrote !== false, now: new Date(now()).toISOString() }));
             return head ? { ...result, ...head } : result;
         },
 
         /** Bring the project scope up to date. `mode: 'full'` re-indexes every file. */
         async syncFiles({ mode = 'incremental' } = {}) {
             const started = Date.now();
-            const { files: stored, contributedPaths } = await storedFiles();
-            const current = await debugStep('sync', `scan ${root} (${mode})`, () => scan(mode === 'full' ? null : stored), found => `${found.size} files (${stored.size} stored)`);
+            const { files: stored, contributedPaths } = await debugStep('sync', 'stored files', storedFiles);
+            const current = await debugStep('sync', 'scan', () => scan(mode === 'full' ? null : stored), found => `${root} (${mode}): ${found.size} files (${stored.size} stored)`);
             const known = mode === 'full' ? new Map() : stored;
             const delta = diff(known, current);
             const removed = mode === 'full' ? [...stored.keys()].filter(file => !current.has(file)) : delta.removed;
@@ -156,7 +156,7 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
 
             // a changed Mendix model (.mpr, mprcontents/) is no indexed file: it alone also makes the sync write
             if (stored.size && !delta.added.length && !delta.changed.length && !removed.length && !(contribute && mendixChanged(root))) {
-                const stats = await repository.stats();
+                const stats = await debugStep('sync', 'stats', () => repository.stats());
                 return { mode, added: 0, updated: 0, removed: 0, unchanged, nodes: stats.scopes?.[PROJECT_SCOPE] || 0, edges: null, durationMs: Date.now() - started, databasePath: repository.databasePath(), wrote: false };
             }
             const totals = await write(known, current, [...delta.added, ...delta.changed], removed, contributedPaths);

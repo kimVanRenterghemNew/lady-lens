@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { parse } from 'acorn';
 import { normalizeNodeId } from '../../model/index.js';
-import { analyzeSource, fileKindOf, configFilesNamed, analyzeSourceForLanguage } from '../../sync/index.js';
+import { analyzeSource, fileKindOf, configFilesNamed, analyzeSourceForLanguage, commentWordsOf } from '../../sync/index.js';
 
 function normalizeAstValue(value) {
     if (Array.isArray(value)) return value.map(normalizeAstValue);
@@ -53,7 +53,8 @@ function codeEntityMetadata(source, facts) {
         calls: facts.calls,
         functions: facts.functions,
         fileSmells: facts.fileSmells || [],
-        reads: configFilesNamed(source)
+        reads: configFilesNamed(source),
+        commentWords: commentWordsOf(source)
     };
     if (facts.callbacks) meta.callbacks = facts.callbacks;
     if (facts.parseError) meta.parseError = facts.parseError;

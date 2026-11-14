@@ -59,6 +59,11 @@ describe('MCP server for lady-lens', () => {
         const readOnly = Object.fromEntries(tools.map(t => [t.name, t.annotations?.readOnlyHint]));
         expect(readOnly).toMatchObject({ mendix_diff: true, grep: true, graph_query: true, discussion_query: true, discussion_save: false, discussion_edit: false, repo_sync: false, config_update: false, branch_diff: true });
 
+        // a `repo` that is neither registered nor a folder is an error (a typo used to answer "not found" from an empty graph)
+        const typo = await client.callTool({ name: 'definedIn', arguments: { repo: path.join(os.tmpdir(), 'lens-no-such-repo-xyz'), symbol: 'x' } });
+        expect(typo.isError).toBe(true);
+        expect(typo.content[0].text).toContain('repository not registered and no folder');
+
         // 2. Call discussion_build
         const buildResult = await client.callTool({
             name: 'discussion_build',

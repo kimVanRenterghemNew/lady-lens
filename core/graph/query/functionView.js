@@ -12,11 +12,11 @@ import { definedIn } from './importLookup.js';
 import { barrelReach } from './impact.js';
 import { analyzeSource, analyzeSourceForLanguage } from '../sync/index.js';
 import { resolveCallee } from '../model/index.js';
+import { docCommentAt } from './docComment.js';
 
 const isTestNode = (node) => node.kind === 'test' || node.type === 'Test' || /(^|\/)test\//.test(String(node.path));
 const isBarrel = (path) => /(^|\/)index\.[cm]?js$/.test(path);
 const MAX_LINES = 5;
-
 /** 1-based line numbers where `symbol` occurs as a whole word. */
 function linesWith(text, symbol) {
     const word = new RegExp(`(^|[^\\w$])${symbol.replace(/[$]/g, '\\$')}(?![\\w$])`);
@@ -88,6 +88,9 @@ function recordCallee(path, call, symbol, targetOf, byPath, callees) {
     }
     callees.get(key).at.push(call[2]);
 }
+
+// proven call sites first: sorted by path, references came first and the budget (cut from the end) dropped real callers
+const provenCallersFirst = (callers) => [...callers].sort((a, b) => Number(Boolean(a.reference)) - Number(Boolean(b.reference)));
 
 function dispatchCallerEntry(isTest, entry, fileText, symbol, tests, callers) {
     if (isTest) {
@@ -187,9 +190,9 @@ export function functionView(graph, symbol, { readFile, maxSites = MAX_LINES }) 
 
     return {
         symbol, found: true,
-        definitions: definitions.map(location => ({ ...location, purpose: byPath.get(location.path)?.purpose ?? null })),
+        definitions: definitions.map(location => ({ ...location, purpose: docCommentAt(factsOf(location.path)?.text, location.startLine), filePurpose: byPath.get(location.path)?.purpose ?? null })),
         calls: [...callees.values()].map(({ at, ...callee }) => ({ ...callee, at: at.slice(0, max) })),
-        callers, tests, stories,
+        callers: provenCallersFirst(callers), tests, stories,
         ...bindingCounts(resolved, unresolved + callsElsewhere(graph, symbol, new Set([...defPaths, ...users]), idToPath)),
         ...classShape(definitions, symbol, [...new Set([...defPaths, ...users])], factsOf),
         ...(discussions.length ? { discussions } : {})

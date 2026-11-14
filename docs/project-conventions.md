@@ -24,6 +24,9 @@ Elke wijziging heeft een toetsbaar doel dat bewijst dat het gedrag werkt.
 4. Schrijf de **implementatie** (tests slagen).
 5. **Verifieer** in een echt scenario (zie 3).
 
+### Sneller maken: eerst meten
+Een optimalisatie begint met een meting en eindigt met een meting op dezelfde machine: `npm run bench -- --baseline` vóór de wijziging, `npm run bench` en `npm run bench:compare` erna (meer dan 25% trager is een achteruitgang). `LENS_PROFILE=1 lens sync` toont welke fase van de sync de tijd neemt; begin daar. Na een versnelling maakt `npm run bench:ratchet` de budgetten in `test/perf-budgets.json` strenger; een budget wordt nooit verhoogd om groen te worden.
+
 ### Sturen op antwoordkwaliteit: eerst evals
 Als de *kwaliteit* van wat lens teruggeeft moet verbeteren (rangschikking, antwoorden van `graph_query`, wat `health` meldt) en het geen codefout is, dan is de volgorde altijd: **eval → wijziging → meten**. Zonder een falend voorbeeld in `evals/graph-gold.json` is bijsturen gokken. Een wijziging die de eval (`npm run eval:graph`) laat zakken, wordt niet geaccepteerd.
 
@@ -70,9 +73,11 @@ Alleen na de tests:
 ```bash
 npm run check          # eslint + tests met dekkingsdrempels
 npm run eval:graph     # kwaliteit van de antwoorden
-npm run test:perf      # prestaties (bij wijzigingen aan sync of query)
+npm run test:perf      # prestatiepoort, apart van de rest (zit ook in check)
 ```
 Daarnaast een echt scenario: `lens mcp -d`, `lens ps`, een tool aanroepen via `lens ask <tool> '<json>'`, het dashboard openen op `:4317`.
+
+**`npm run check` draait vóór elke commit en elke push, zonder uitzondering.** `npm test` alleen is niet genoeg: lint, de dekkingsdrempels en de prestatie- en evalpoorten slaan pas aan in `check`. Een build is op 2026-11-11 gefaald omdat `check` niet gedraaid was. Faalt `check`, dan wordt er niet gecommit; geen drempel verlagen of test overslaan om groen te worden. Een release gaat altijd via `npm run build` (skill bijwerken, `check`, `pack`): zo komt er geen pakket in `dist/` zonder groene tests.
 
 ### Levenscyclus van een item
 ```
@@ -155,8 +160,9 @@ export const isRouteNotFound = (error) => error?.code === ROUTE_NOT_FOUND;
 **npm**
 - `npm test` vitest (zonder `*.integration.test.js`); `npm run test:coverage` met dekking
 - `npm run lint` ESLint; `npm run check` = lint + dekking (draait ook voor `npm publish`)
+- `npm run build` = `skill` + `check` + `pack`: de enige weg naar een release-pakket
 - `npm run eval:graph` kwaliteit van de graafantwoorden (`evals/graph-gold.json`)
-- `npm run bench` en `npm run test:perf` prestaties; `scripts/lens-scale.mjs` maakt grote testrepo's
+- `npm run bench` (`-- --baseline`, `-- --scale <profiel>`), `npm run bench:compare`, `npm run bench:ratchet` en `npm run test:perf` prestaties; `lens bench --repo <map>` meet een eigen repo; `scripts/lens-scale.mjs` maakt grote testrepo's
 - `npm run mcp`, `npm start` de daemon starten
 
 **Voor een lange of echte controle**
@@ -170,7 +176,7 @@ Controleer eerst dat de wijziging echt in je werkmap staat (`git status`, `git l
 2. **Gedrag eerst**: tests beschrijven wat de gebruiker kan, niet hoe het werkt.
 3. **Tests eerst**: schrijf ze voor de code en zie ze falen.
 4. **Altijd eenvoudig**: voeg complexiteit toe als een test erom vraagt.
-5. **Alles verifiëren**: een item is pas klaar als `npm run check` en de eval slagen.
+5. **Alles verifiëren**: een item is pas klaar als `npm run check` en de eval slagen; geen commit of push zonder groene `npm run check`.
 
 ## Waar vind je wat
 

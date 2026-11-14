@@ -157,4 +157,4 @@ export function query(graph, rawOpts) {
 
 export { buildContextFromGraph } from './graphContext.js';
 export { validateGraph } from '../model/index.js';
-export { answerNode, QUERY_NODE_PROPERTIES } from './answerNode.js';
+export { answerNode, shortNode, QUERY_NODE_PROPERTIES } from './answerNode.js';

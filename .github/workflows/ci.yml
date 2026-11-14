@@ -35,6 +35,9 @@ jobs:
       - name: Run coverage checks
         run: npm run test:coverage
 
+      - name: Run performance gate
+        run: npm run test:perf
+
       - name: Run lint
         run: npm run lint
 

@@ -44,7 +44,7 @@ describe('graph_query cuts edges before nodes', () => {
         const { fitToBudget } = await import('../core/search/index.js');
         const big = (n, tag) => Array.from({ length: n }, (_, i) => ({ id: `${tag}${i}`, text: 'y'.repeat(300) }));
         const src = fs.readFileSync('core/search/index.js', 'utf8');
-        const lists = JSON.parse(src.match(/graph_query: withBudget\(graph_query, \{ lists: (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+        const lists = JSON.parse(src.match(/graph_query: listTool\('graph_query', graph_query, \{ lists: (\[[^\]]*\])/)[1].replace(/'/g, '"'));
         const fitted = fitToBudget({ nodes: big(8, 'n'), edges: big(20, 'e') }, { lists });
         expect(fitted.nodes.length).toBe(8);
         expect(fitted.edges.length).toBeLessThan(20);
@@ -53,11 +53,23 @@ describe('graph_query cuts edges before nodes', () => {
     it('diff_impact over a big range keeps the riskiest functions: the changed files go first (164 files left 0 functions)', async () => {
         const { fitToBudget } = await import('../core/search/index.js');
         const src = fs.readFileSync('core/search/index.js', 'utf8');
-        const lists = JSON.parse(src.match(/diff_impact: withBudget\(args => diffImpact\(args\), \{ lists: (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+        const lists = JSON.parse(src.match(/diff_impact: listTool\('diff_impact', args => diffImpact\(args\), \{ lists: (\[[^\]]*\])/)[1].replace(/'/g, '"'));
         const files = Array.from({ length: 164 }, (_, i) => `core/some/folder/file${i}.js`);
         const functions = Array.from({ length: 3 }, (_, i) => ({ function: `f${i}`, file: files[i], callers: [], tests: [] }));
         const fitted = fitToBudget({ relation: 'diffImpact', files, functions, testGaps: files.map(file => `${file}#f`), total: 978 }, { lists });
         expect(fitted.functions).toHaveLength(3);
+    });
+
+    it('functionView keeps its callers and cuts stories and tests first (Kura 2026-11-12: callers 0 of 11, tests 4 of 7)', async () => {
+        const { fitToBudget } = await import('../core/search/index.js');
+        const src = fs.readFileSync('core/search/index.js', 'utf8');
+        const lists = JSON.parse(src.match(/functionView: listTool\('functionView', args => functionViewTool\(args\), \{ lists: (\[[^\]]*\])/)[1].replace(/'/g, '"'));
+        const big = (n, tag) => Array.from({ length: n }, (_, i) => ({ path: `${tag}${i}.js`, lines: Array.from({ length: 5 }, (__, j) => j), text: 'y'.repeat(300) }));
+        const fitted = fitToBudget({ symbol: 'generateTasks', callers: big(11, 'c'), tests: big(7, 't'), stories: big(9, 's') }, { lists });
+        expect(fitted.callers.length).toBeGreaterThan(0);
+        expect(fitted.callers.length).toBeGreaterThanOrEqual(fitted.tests.length);
+        expect(fitted.stories).toEqual([]);
+        expect(fitted.hint).not.toContain('ask about one symbol');
     });
 
     it('the hint says per list what is shown, so a matchCount above the nodes shown is explained (Kura, 2026-11-11)', async () => {

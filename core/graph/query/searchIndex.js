@@ -8,10 +8,11 @@ import { words } from './rankTokens.js';
 const SKIPPED_FIELDS = new Set(['id', 'type', 'createdAt', 'updatedAt', 'timestamp', 'timestampStatus', 'observedAt']);
 const EXCLUDED_OTHER_FIELDS = new Set([
     'path', 'purpose', 'exports', 'symbols', 'keywords', 'title', 'name',
-    'symbolRanges', 'functions', 'calls', 'reads'
+    'symbolRanges', 'functions', 'calls', 'reads', 'commentWords'
 ]);
 
 const NODE_SEARCH_CACHE = new WeakMap();
+const commentSet = node => new Set(Array.isArray(node.commentWords) ? node.commentWords : []);
 
 function extractOtherText(node) {
     return Object.entries(node)
@@ -51,7 +52,7 @@ function buildIndexData(node, rawPath, filePath) {
         rawPath, filePath, segments, stem, stemClean,
         symbolTokens, exportTokens, symbolsLower,
         title: `${node.title || ''} ${node.name || ''}`.toLowerCase(),
-        purpose: String(node.purpose || '').toLowerCase(), purposeTokens: words(node.purpose), other, stemOnly, nameWords,
+        purpose: String(node.purpose || '').toLowerCase(), purposeTokens: words(node.purpose), commentWords: commentSet(node), other, stemOnly, nameWords,
         isTest: node.kind === 'test' || node.type === 'Test', isBarrel: /^index\.[cm]?js$/.test(stemOnly),
         isDoc: isDocNode(node)
     };

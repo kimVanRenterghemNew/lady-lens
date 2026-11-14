@@ -4,6 +4,7 @@
  */
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { RESEARCH_TOOLS, withBudget } from '../search/index.js';
+import { traceAsync } from '../observability/index.js';
 import { configGrep, configReferences, configUpdate, repoList, repoAdd, repoRemove, repoSync, branchDiff, branchImpact, commitShow, functionHistory, crossRepoSearch, mendixDiff } from './handlers/index.js';
 
 const text = value => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
@@ -27,8 +28,7 @@ export const TOOL_ROUTES = [
 
 export async function callTool(name, args, context) {
     const route = TOOL_ROUTES.find(r => r.name === name);
-    if (route) return text(await route.handle(args, context));
     const tool = RESEARCH_TOOLS[name];
-    if (!tool) throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-    return text(await tool(args));
+    if (!route && !tool) throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
+    return traceAsync(`tool: ${name}`, { kind: 'SERVER' }, async () => text(route ? await route.handle(args, context) : await tool(args)));
 }

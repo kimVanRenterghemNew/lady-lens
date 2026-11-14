@@ -3,6 +3,7 @@ import path from 'path';
 import { REPO_ROOT } from '../configuration/index.js';
 import { createGit } from '../git/index.js';
 import { isGraphExtension, normalizeRelativePath, shouldExcludePath } from './projectSettings.js';
+import { gitignoredPaths } from './gitignoreRules.js';
 
 /** True when `scanGraphFiles` would yield this repo-relative file: under a graph root, not excluded, with a graph extension. */
 export function inGraphScope(relativePath, settings = {}) {
@@ -14,6 +15,9 @@ export function inGraphScope(relativePath, settings = {}) {
     });
     return underRoot && !shouldExcludePath(file, excludeDirs) && isGraphExtension(file, extensions);
 }
+
+// without git's answer (a folder git refuses, or no git) the .gitignore files, read by lens
+const ignoredUnder = (rootDir, given) => given ?? createGit({ root: rootDir }).ignoredPaths() ?? gitignoredPaths(rootDir);
 
 /**
  * Walk configured graph roots and yield files that are eligible for indexing.
@@ -27,7 +31,7 @@ export async function scanGraphFiles(options = {}) {
     const extensions = settings.project?.graph_extensions || [];
     const roots = settings.project?.graph_roots || [];
     // build output and caches git ignores (a Mendix deployment/ of 50 MB generated JavaScript filled Ladybug's buffer pool)
-    const ignored = new Set(options.ignored ?? createGit({ root: rootDir }).ignoredPaths());
+    const ignored = new Set(ignoredUnder(rootDir, options.ignored));
     const isIgnored = (relativePath, directory) => ignored.has(directory ? `${relativePath}/` : relativePath);
     const found = [];
 

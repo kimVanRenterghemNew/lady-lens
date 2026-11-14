@@ -1,4 +1,18 @@
 import { DISCUSSION_TOOL_SCHEMAS } from '../discussions/index.js';
+import { TOOL_LIMITS, toolLimitSetting } from '../configuration/index.js';
+
+// what `limit` counts per list tool; the default comes from TOOL_LIMITS, so schema and behaviour cannot differ
+const LIMITED = {
+    graph_query: 'nodes (candidates to choose from; over the context budget the later ones come as path, purpose and a few exports)',
+    grep: 'matches', glob: 'paths', searchView: 'matches', importedBy: 'files', imports: 'files', exports: 'names', definedIn: 'locations',
+    functionView: 'callers, tests and stories each', folderView: 'parts', health: 'files per list', diff_impact: 'functions', discussion_query: 'discussions'
+};
+
+function withLimits(schema) {
+    if (!(schema.name in TOOL_LIMITS)) return schema;
+    const limit = { type: 'integer', description: `Maximum number of ${LIMITED[schema.name]} (default ${TOOL_LIMITS[schema.name]}; setting LENS_${toolLimitSetting(schema.name)})` };
+    return { ...schema, parameters: { ...schema.parameters, properties: { ...schema.parameters.properties, limit } } };
+}
 
 export const RESEARCH_TOOL_SCHEMAS = [
     ...DISCUSSION_TOOL_SCHEMAS,
@@ -56,7 +70,7 @@ export const RESEARCH_TOOL_SCHEMAS = [
     {
         name: 'health',
         description: 'Code health: which files no test reaches (also through index.js), exports no test names, import cycles, imports past a module index.js, large files, fan-in/out, hotspots (churn x size); on request hubs and bridges. Worst first; per file, per module or the whole repo.',
-        parameters: { type: 'object', properties: { file: { type: 'string', description: 'Repo-relative file path' }, module: { type: 'string', description: 'Folder, e.g. core/graph' }, limit: { type: 'integer', description: 'Maximum number of files (default 20)' }, hubs: { type: 'boolean', description: 'true = also the files with the most neighbours (imports and calls)' }, bridges: { type: 'boolean', description: 'true = also the files on the most shortest paths between others (betweenness); slower on big repos' } } }
+        parameters: { type: 'object', properties: { file: { type: 'string', description: 'Repo-relative file path' }, module: { type: 'string', description: 'Folder, e.g. core/graph' }, hubs: { type: 'boolean', description: 'true = also the files with the most neighbours (imports and calls)' }, bridges: { type: 'boolean', description: 'true = also the files on the most shortest paths between others (betweenness); slower on big repos' } } }
     },
     {
         name: 'functionView',
@@ -66,7 +80,7 @@ export const RESEARCH_TOOL_SCHEMAS = [
     {
         name: 'diff_impact',
         description: 'What does my change touch? The functions a diff changes (default: the work not committed yet; or `from`..`to`, a branch from its merge-base) with per function its callers (file, lines), tests, bound and unbound call counts, complexity, and test gaps (changed functions no test names). Riskiest first.',
-        parameters: { type: 'object', properties: { from: { type: 'string', description: 'Start of a commit range or the base branch; leave out for the work not committed yet' }, to: { type: 'string', description: 'End of the range (default HEAD)' }, limit: { type: 'integer', description: 'Maximum number of functions (default 50)' } } }
+        parameters: { type: 'object', properties: { from: { type: 'string', description: 'Start of a commit range or the base branch; leave out for the work not committed yet' }, to: { type: 'string', description: 'End of the range (default HEAD)' } } }
     },
     {
         name: 'folderView',
@@ -94,8 +108,7 @@ export const RESEARCH_TOOL_SCHEMAS = [
                 wholeWord: { type: 'boolean', description: 'true = match whole words only (default false)' },
                 isRegex: { type: 'boolean', description: 'true = treat query as regular expression (default false)' },
                 kind: { type: 'string', enum: ['all', 'code', 'doc', 'test'], description: 'Filter by file kind (default "all")' },
-                include: { type: 'string', description: 'Optional file/directory glob pattern to include, e.g. "src/**", "*.cs"' },
-                limit: { type: 'integer', description: 'Maximum total matches (default 100)' }
+                include: { type: 'string', description: 'Optional file/directory glob pattern to include, e.g. "src/**", "*.cs"' }
             },
             required: ['query']
         }
@@ -108,15 +121,15 @@ export const RESEARCH_TOOL_SCHEMAS = [
             properties: {
                 sessionId: { type: 'string', description: 'Session folder under .memory' },
                 node: { type: 'string', description: 'Starting node ID for neighbor or traversal queries' },
-                kind: { type: 'string', enum: ['doc'], description: 'doc = search only the documentation (backlog, docs, README)' },
+                kind: { type: 'string', enum: ['all', 'code', 'doc', 'test'], description: 'code = only source (no tests, no docs); doc = only the documentation (backlog, docs, README); test = only tests' },
+                places: { type: 'boolean', description: 'true = also `places`: in the best code files, the functions and lines that name the state or behaviour of the query ("when the queue is empty"), best first; empty with a `placesNote` when no function names enough of it' },
                 history: { type: 'boolean', description: 'true = also superseded decisions (for regressions); default only current ones' },
                 query: { type: 'string', description: 'Text to match against graph context' },
                 outgoing: { type: ['boolean', 'object'], description: 'Follow outgoing edges' },
                 incoming: { type: ['boolean', 'object'], description: 'Follow incoming edges' },
                 path: { type: 'string', description: 'Arrow-separated edge types for multi-hop traversal' },
-                maxDepth: { type: 'integer', description: 'Follow any outgoing edge type up to N hops' },
-                limit: { type: 'integer', description: 'Maximum number of returned nodes' }
+                maxDepth: { type: 'integer', description: 'Follow any outgoing edge type up to N hops' }
             }
         }
     }
-].map(schema => ({ readOnly: true, ...schema })); // research tools only read; a schema that writes says so itself
+].map(schema => withLimits({ readOnly: true, ...schema })); // research tools only read; a schema that writes says so itself

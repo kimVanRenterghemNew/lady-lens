@@ -1,0 +1,193 @@
+{
+  "about": "Behaviour cases mined from the history of graphify (evals/mineCases.mjs, seed 1): a commit subject as the question, its parent as the state, the source files it changed as the answer. 503 of 2023 commits qualified.",
+  "repo": "C:/git/graphify",
+  "top": 3,
+  "cases": [
+    {
+      "id": "5d01373",
+      "kind": "code",
+      "commit": "912d832a60",
+      "expected": [
+        "graphify/llm.py"
+      ],
+      "query": "Feat: opt-in GRAPHIFY_DISABLE_THINKING; correct deepseek thinking default (#1621)"
+    },
+    {
+      "id": "258d260",
+      "kind": "code",
+      "commit": "c4c2205658",
+      "expected": [
+        "graphify/__main__.py",
+        "graphify/llm.py"
+      ],
+      "query": "feat: add --backend claude-cli (routes through Claude Code, no API key needed) (#855)"
+    },
+    {
+      "id": "0f93685",
+      "kind": "code",
+      "commit": "fcc01dbcdf",
+      "expected": [
+        "graphify/cli.py",
+        "graphify/export.py"
+      ],
+      "query": "fix(extract): extend the incomplete-build shrink guard to the --no-cluster path"
+    },
+    {
+      "id": "1494874",
+      "kind": "code",
+      "commit": "e44e6e986c",
+      "expected": [
+        "graphify/extract.py"
+      ],
+      "query": "feat: track JS/TS barrel re-exports as explicit graph edges"
+    },
+    {
+      "id": "62f49ba",
+      "kind": "code",
+      "commit": "d89ec68af9",
+      "expected": [
+        "graphify/__main__.py"
+      ],
+      "query": "fix: persist cluster-only analysis sidecar"
+    },
+    {
+      "id": "13947c3",
+      "kind": "code",
+      "commit": "96c1d04889",
+      "expected": [
+        "graphify/serve.py"
+      ],
+      "query": "add MCP resources: report, stats, god-nodes, surprises, audit, questions"
+    },
+    {
+      "id": "b688a26",
+      "kind": "code",
+      "commit": "15a86536c4",
+      "expected": [
+        "graphify/cli.py",
+        "graphify/serve.py"
+      ],
+      "query": "fix(path): prefer full-token label matches when resolving path endpoints (#1785)"
+    },
+    {
+      "id": "ad70152",
+      "kind": "code",
+      "commit": "21bcb436b5",
+      "expected": [
+        "graphify/extract.py"
+      ],
+      "query": "fix(swift): emit references for enum associated-value types"
+    },
+    {
+      "id": "b1ea935",
+      "kind": "code",
+      "commit": "1026695da7",
+      "expected": [
+        "graphify/export.py"
+      ],
+      "query": "add .qmd to to_obsidian_canvas safe_name regex"
+    },
+    {
+      "id": "0dfc26e",
+      "kind": "code",
+      "commit": "5f5b59309c",
+      "expected": [
+        "graphify/extract.py"
+      ],
+      "query": "fix: prefer file matches over directory matches in resolver"
+    },
+    {
+      "id": "7841244",
+      "kind": "code",
+      "commit": "d424a7ccfa",
+      "expected": [
+        "graphify/manifest_ingest.py"
+      ],
+      "query": "docs(manifest): describe tomli-missing path as fail-visible, not fail-loud"
+    },
+    {
+      "id": "f69dca3",
+      "kind": "code",
+      "commit": "2f743aea89",
+      "expected": [
+        "graphify/cli.py"
+      ],
+      "query": "fix: prefer top-level hyperedges in export"
+    },
+    {
+      "id": "cd04bf1",
+      "kind": "code",
+      "commit": "bedf32e07c",
+      "expected": [
+        "graphify/extractors/engine.py"
+      ],
+      "query": "fix(csharp): extract members inside #if preprocessor blocks (#2634)"
+    },
+    {
+      "id": "f5743dd",
+      "kind": "code",
+      "commit": "b3cd74a0cb",
+      "expected": [
+        "graphify/extract.py",
+        "graphify/extractors/engine.py"
+      ],
+      "query": "fix(cpp): keep symbols for nested C++ types and C++/CLI sources (#2876)"
+    },
+    {
+      "id": "638d9e2",
+      "kind": "code",
+      "commit": "91e43c7678",
+      "expected": [
+        "graphify/detect.py",
+        "graphify/manifest_ingest.py"
+      ],
+      "query": "fix(ingest): recognize Cargo.toml as a package manifest (#2434)"
+    },
+    {
+      "id": "c8c604d",
+      "kind": "code",
+      "commit": "57469641cd",
+      "expected": [
+        "graphify/extract.py"
+      ],
+      "query": "feat(js): resolve namespace re-export bindings (export * as ns from) (#1552)"
+    },
+    {
+      "id": "35fb437",
+      "kind": "code",
+      "commit": "0080d8ac43",
+      "expected": [
+        "graphify/extract.py"
+      ],
+      "query": "fix(ids): salt residual separator-collision node IDs injectively (#1522)"
+    },
+    {
+      "id": "90b545c",
+      "kind": "code",
+      "commit": "373bc8efd8",
+      "expected": [
+        "graphify/__main__.py",
+        "graphify/detect.py"
+      ],
+      "query": "fix(cli): survive early pipe close (#1807); skip .nox venvs (#1804)"
+    },
+    {
+      "id": "027fd7a",
+      "kind": "code",
+      "commit": "61e27fb1a5",
+      "expected": [
+        "graphify/llm.py"
+      ],
+      "query": "remove spurious base_url from bedrock BACKENDS entry"
+    },
+    {
+      "id": "cca13aa",
+      "kind": "code",
+      "commit": "a9d6be6537",
+      "expected": [
+        "graphify/detect.py"
+      ],
+      "query": "fix anchored gitignore pattern leaking basename match into subtree (closes #1087)"
+    }
+  ]
+}

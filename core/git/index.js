@@ -7,7 +7,13 @@ import { execFileSync } from 'child_process';
 export { createFakeGit, fakeSha } from './fakeGit.js';
 
 // windowsHide: in the detached daemon (no console) every git call without it opened a console and took ~1 s, not ~75 ms
-const defaultRun = (root, args, { input, encoding = 'utf8' } = {}) => execFileSync('git', args, { cwd: root, encoding, input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'ignore'], maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+// stderr piped, not ignored: the error then carries git's reason (`error.stderr`), such as "dubious ownership"
+const defaultRun = (root, args, { input, encoding = 'utf8' } = {}) => execFileSync('git', args, { cwd: root, encoding, input, stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'], maxBuffer: 256 * 1024 * 1024, windowsHide: true });
+
+export const GIT_UNSAFE_REPOSITORY = 'GIT_UNSAFE_REPOSITORY';
+const isUnsafe = error => /dubious ownership/i.test(String(error?.stderr || error?.message || ''));
+/** git refuses a folder owned by another user: every git answer would be empty, and "unknown branch" sent people the wrong way. */
+const unsafeRepository = root => Object.assign(new Error(`git refuses to read ${root}: "dubious ownership" (the folder belongs to another Windows user). Run once: git config --global --add safe.directory "${String(root).replace(/\\/g, '/')}". lady-lens does not change your git configuration itself.`), { code: GIT_UNSAFE_REPOSITORY });
 
 /** `cat-file --batch` output (`<sha> blob <size>\n<bytes>\n` or `<name> missing\n` per request) to the text of each requested path, null when missing. */
 export function parseBatch(buffer, paths) {
@@ -44,6 +50,13 @@ function commitFrom(output) {
     return sha ? { sha, parents: parents ? parents.split(' ') : [], date: isoDate(date), author, subject: subject.join('\t') } : null;
 }
 
+/** One `@@`-block of `git log --name-status`: the commit and its files as `{ status: 'A'|'M'|'D', path }` (a merge has none). */
+function commitWithFiles(block) {
+    const [first, ...lines] = block.split(/\r?\n/);
+    const files = lines.filter(Boolean).map(line => line.split('\t')).map(([status, file]) => ({ status: status[0], path: file }));
+    return { ...commitFrom(first), files };
+}
+
 /** `git grep -n <ref>` output (`ref:file:line:text`) to hits. */
 const grepHits = (output, ref) => (output || '').split(/\r?\n/).filter(Boolean).map(line => {
     const match = line.slice(ref.length + 1).match(/^(.+?):(\d+):(.*)$/);
@@ -61,11 +74,18 @@ export function createGit({ root, run = defaultRun } = {}) {
     const tryGit = (...args) => { try { return git(...args); } catch { return null; } };
     return {
         currentBranch: () => tryGit('rev-parse', '--abbrev-ref', 'HEAD')?.trim() || null,
-        resolveCommit: ref => tryGit('rev-parse', '--verify', '--quiet', `${ref}^{commit}`)?.trim() || null,
+        // null for an unknown ref; a folder git refuses is no unknown ref, so that throws (GIT_UNSAFE_REPOSITORY)
+        resolveCommit: ref => {
+            try { return git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`).trim() || null; } catch (error) {
+                if (isUnsafe(error)) throw unsafeRepository(root);
+                return null;
+            }
+        },
         mergeBase: (a, b) => tryGit('merge-base', a, b)?.trim() || null,
         diffNameStatus: (from, to) => parseNameStatus(git('diff', '--name-status', '-M', from, to)),
         // what .gitignore leaves out, relative to `root`: a folder ends in '/' and stands for everything in it; [] outside a repository
-        ignoredPaths: () => (tryGit('ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory') || '').split('\0').filter(Boolean).sort(),
+        // null when git cannot answer (no repository, or a folder it refuses): the caller reads .gitignore itself
+        ignoredPaths: () => tryGit('ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory')?.split('\0').filter(Boolean).sort() ?? null,
         // the work not committed yet (staged or not) against HEAD, untracked files as added; [] outside a repository
         worktreeChanges: () => [
             ...parseNameStatus(tryGit('diff', '--name-status', '-M', 'HEAD') || ''),
@@ -98,6 +118,8 @@ export function createGit({ root, run = defaultRun } = {}) {
             if (head) HISTORY.set(root, { key, files });
             return files;
         },
+        // the newest `max` commits of HEAD with the files each changed (no renames: a move is a delete and an add)
+        commitsWithFiles: (max = 1000) => (tryGit('log', `-n${max}`, '--no-renames', '--name-status', `--format=format:@@${COMMIT_FORMAT}`) || '').split('@@').slice(1).map(commitWithFiles),
         listBranches: () => (tryGit('for-each-ref', '--format=%(refname:short)', 'refs/heads') || '').split(/\r?\n/).filter(Boolean),
         // every file in the tree of `ref`, relative to `root` (paths outside it are not listed)
         listTree: ref => tryGit('ls-tree', '-r', '--name-only', '-z', ref)?.split('\0').filter(Boolean) ?? null,

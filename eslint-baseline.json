@@ -184,7 +184,7 @@
       "write#1": 7
     },
     "core/graph/sync/headCommit.js": {
-      "recordHead#1": 16
+      "recordHead#1": 15
     },
     "core/graph/sync/languages/blocks.js": {
       "findIndentedBlockEnd#1": 8
@@ -209,7 +209,7 @@
       "extract#2": 12
     },
     "core/graph/sync/mendix.js": {
-      "askMxcli#1": 8
+      "askMxcli#1": 7
     },
     "core/language/fuzzy.js": {
       "closestWord#1": 10
@@ -277,7 +277,7 @@
     },
     "core/repository/projectScanner.js": {
       "inGraphScope#1": 8,
-      "scanGraphFiles#1": 13,
+      "scanGraphFiles#1": 12,
       "walk#1": 8
     },
     "core/repository/projectSettings.js": {
@@ -289,7 +289,7 @@
       "resolveRepoTarget#1": 7
     },
     "core/search/budget.js": {
-      "fitToBudget#1": 17
+      "fitToBudget#1": 16
     },
     "core/search/chunkReader.js": {
       "read_chunk#1": 26
@@ -323,12 +323,12 @@
     },
     "core/search/graphModelLoader.js": {
       "freshnessFor#1": 8,
-      "loadGraphModel#1": 18,
+      "loadGraphModel#1": 17,
       "refreshProjectGraph#1": 11
     },
     "core/search/grepSearch.js": {
       "glob#1": 7,
-      "grep#1": 27
+      "grep#1": 26
     },
     "core/search/imports.js": {
       "importLookupTool#1": 9,
@@ -349,9 +349,6 @@
     },
     "core/update/lensUpdate.js": {
       "runLensUpdate#1": 8
-    },
-    "scripts/benchmark.mjs": {
-      "runBenchmark#1": 16
     },
     "scripts/designRules.mjs": {
       "measureDesignRules#1": 7
