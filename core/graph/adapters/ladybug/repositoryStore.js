@@ -7,7 +7,7 @@ import { openLadybugGraph, upsertEntities, createRelations, resolveDatabasePath 
 import { lensEnv } from '../../../configuration/index.js';
 import { PROJECT_SCOPE, parseJson, rowToNode, rowToStoredNode, rowToEdge } from '../../model/index.js';
 import { createDirectQueries } from './directQueries.js';
-import { clearProject, projectCounts } from './projectWriteQueries.js';
+import { clearProjectPaths, relationDelta, deleteRelations, projectCounts } from './projectWriteQueries.js';
 
 export { rowToNode };
 
@@ -84,24 +84,24 @@ export function createLadybugRepositoryStore({ databasePath, open = openLadybugG
         },
 
         async applyProjectChanges(scope, { upserts = [], removePaths = [], relations = [] } = {}) {
-            if (upserts.length <= PROJECT_WRITE_BATCH_SIZE && removePaths.length <= PROJECT_WRITE_BATCH_SIZE && relations.length <= PROJECT_WRITE_BATCH_SIZE) {
+            const batch = PROJECT_WRITE_BATCH_SIZE;
+            const inBatches = async (rows, write) => { for (let i = 0; i < rows.length; i += batch) await withGraph(graph => write(graph, rows.slice(i, i + batch))); };
+            // one open for a few nodes (relations are only their delta, in statements of bounded size); many nodes open per batch
+            if (upserts.length <= batch && removePaths.length <= batch) {
                 return withGraph(async graph => {
-                    await clearProject(graph, scope, removePaths, PROJECT_WRITE_BATCH_SIZE);
+                    await clearProjectPaths(graph, scope, removePaths, batch);
                     await upsertEntities(graph, upserts.map(entity => ({ ...entity, scope })));
-                    await createRelations(graph, relations);
+                    const { changed, stale } = await relationDelta(graph, scope, relations);
+                    await deleteRelations(graph, stale, batch);
+                    await createRelations(graph, changed);
                     return projectCounts(graph, scope);
                 });
             }
-
-            await withGraph(graph => clearProject(graph, scope, removePaths, PROJECT_WRITE_BATCH_SIZE));
-            for (let i = 0; i < upserts.length; i += PROJECT_WRITE_BATCH_SIZE) {
-                const batch = upserts.slice(i, i + PROJECT_WRITE_BATCH_SIZE);
-                await withGraph(graph => upsertEntities(graph, batch.map(entity => ({ ...entity, scope }))));
-            }
-            for (let i = 0; i < relations.length; i += PROJECT_WRITE_BATCH_SIZE) {
-                const batch = relations.slice(i, i + PROJECT_WRITE_BATCH_SIZE);
-                await withGraph(graph => createRelations(graph, batch));
-            }
+            await withGraph(graph => clearProjectPaths(graph, scope, removePaths, batch));
+            await inBatches(upserts, (graph, rows) => upsertEntities(graph, rows.map(entity => ({ ...entity, scope }))));
+            const { changed, stale } = await withGraph(graph => relationDelta(graph, scope, relations));
+            await inBatches(stale, (graph, rows) => deleteRelations(graph, rows, batch));
+            await inBatches(changed, (graph, rows) => createRelations(graph, rows));
             return withGraph(graph => projectCounts(graph, scope));
         },
 

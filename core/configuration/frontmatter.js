@@ -9,7 +9,12 @@
  * - Proper indentation handling for Windows (CRLF) and Unix (LF) line endings
  */
 
-import YAML from 'yaml';
+import { createRequire } from 'module';
+
+// loaded on first use: `yaml` costs ~70 ms, which every lens command paid at start (trace 2026-11-15)
+const require = createRequire(import.meta.url);
+let yamlModule;
+export const loadYaml = () => (yamlModule ??= require('yaml'));
 
 /**
  * Parse YAML frontmatter from markdown content.
@@ -23,7 +28,7 @@ export function parseFrontmatter(content) {
     const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!match) return {};
     try {
-        const parsed = YAML.parse(match[1], { logLevel: 'error' });
+        const parsed = loadYaml().parse(match[1], { logLevel: 'error' });
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
     } catch { /* lenient fallback below */ }
     return parseFrontmatterLenient(content);
@@ -141,6 +146,6 @@ function unquoteYamlString(value) {
 
 export function stringifyFrontmatter(obj, body = '') {
     const clean = JSON.parse(JSON.stringify(obj ?? {}));
-    const yaml = YAML.stringify(clean, { lineWidth: 0 }).trimEnd();
+    const yaml = loadYaml().stringify(clean, { lineWidth: 0 }).trimEnd();
     return `---\n${yaml}\n---\n${body}`;
 }

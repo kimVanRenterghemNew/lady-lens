@@ -72,6 +72,13 @@ const HISTORY = new Map(); // root -> { key: 'HEAD sha|max', files }: the last c
 export function createGit({ root, run = defaultRun } = {}) {
     const git = (...args) => run(root, args);
     const tryGit = (...args) => { try { return git(...args); } catch { return null; } };
+    const logFiles = (max, range) => (tryGit('log', `-n${max}`, '--name-only', '--no-renames', '--format=format:@@', ...range) || '').split('@@').slice(1).map(block => block.split(/\r?\n/).map(line => line.trim()).filter(Boolean));
+    function headFiles(max) {
+        const head = tryGit('rev-parse', 'HEAD')?.trim(), key = `${head}|${max}`;
+        if (!head) return logFiles(max, []); // no HEAD (yet): nothing to key a cache on
+        if (HISTORY.get(root)?.key !== key) HISTORY.set(root, { key, files: logFiles(max, []) });
+        return HISTORY.get(root).files;
+    }
     return {
         currentBranch: () => tryGit('rev-parse', '--abbrev-ref', 'HEAD')?.trim() || null,
         // null for an unknown ref; a folder git refuses is no unknown ref, so that throws (GIT_UNSAFE_REPOSITORY)
@@ -111,13 +118,8 @@ export function createGit({ root, run = defaultRun } = {}) {
         fileLog: (ref, filePath, { max = 30 } = {}) => (tryGit('log', `-n${max}`, `--format=${COMMIT_FORMAT}`, ref, '--', filePath) || '').split(/\r?\n/).map(commitFrom).filter(Boolean),
         // the files of the last `max` commits of HEAD, one array per commit (merge commits list none); [] without git
         // cached per root until HEAD moves: every sync with a change and every `health` call asked again (~0.5 s on 1000 commits)
-        commitFiles: (max = 1000) => {
-            const head = tryGit('rev-parse', 'HEAD')?.trim(), key = `${head}|${max}`, cached = HISTORY.get(root);
-            if (head && cached?.key === key) return cached.files;
-            const files = (tryGit('log', `-n${max}`, '--name-only', '--no-renames', '--format=format:@@') || '').split('@@').slice(1).map(block => block.split(/\r?\n/).map(line => line.trim()).filter(Boolean));
-            if (head) HISTORY.set(root, { key, files });
-            return files;
-        },
+        // `since`: only the commits of `since`..HEAD, what came in after a commit whose files are known (not cached here)
+        commitFiles: (max = 1000, { since } = {}) => (since ? logFiles(max, [`${since}..HEAD`]) : headFiles(max)),
         // the newest `max` commits of HEAD with the files each changed (no renames: a move is a delete and an add)
         commitsWithFiles: (max = 1000) => (tryGit('log', `-n${max}`, '--no-renames', '--name-status', `--format=format:@@${COMMIT_FORMAT}`) || '').split('@@').slice(1).map(commitWithFiles),
         listBranches: () => (tryGit('for-each-ref', '--format=%(refname:short)', 'refs/heads') || '').split(/\r?\n/).filter(Boolean),

@@ -1,8 +1,7 @@
 import fs from 'fs/promises';
 import fsSync from 'fs';
 import path from 'path';
-import YAML from 'yaml';
-import { REPO_ROOT, lensEnv, configureLensEnv } from '../configuration/index.js';
+import { REPO_ROOT, lensEnv, configureLensEnv, loadYaml } from '../configuration/index.js';
 
 // A repository may describe itself in config.json or .lady-lens.yaml; a host application points elsewhere with SETTINGS_PATH.
 const defaultSettingsPath = () => {
@@ -47,7 +46,7 @@ function parseConfig(content) {
     try {
         return JSON.parse(content);
     } catch {
-        return YAML.parse(content) || {};
+        return loadYaml().parse(content) || {};
     }
 }
 

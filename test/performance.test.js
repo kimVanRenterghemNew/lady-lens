@@ -10,12 +10,13 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 import { performance } from 'perf_hooks';
+import { spawnSync } from 'child_process';
 import { createProfiler, globalProfiler, NESTED } from '../core/observability/index.js';
 import { createGraphSync, createGraphRepository, rankGraphNodes, codeHealth, hubsAndBridges } from '../core/graph/index.js';
 import { loadGraphModel, definedInTool, exportsTool, fileExists, diffImpact, graph_query, functionViewTool, folderViewTool, invalidateGraphCache } from '../core/search/index.js';
 import { createFakeGit } from '../core/git/index.js';
 import { crossRepoSearch } from '../core/mcp/handlers/index.js';
-import { measureRuns, measurePhases, checkBudgets, ratchetBudgets } from '../core/bench/index.js';
+import { measureRuns, measurePhases, checkBudgets, ratchetBudgets, LENS_BIN } from '../core/bench/index.js';
 
 const BUDGET_FILE = path.join(process.cwd(), 'test', 'perf-budgets.json');
 const RATCHET = process.env.PERF_RATCHET === '1';
@@ -117,6 +118,13 @@ describe('Performance Diagnostics & Benchmarks', () => {
             expect((await exportsTool({ file: 'core/graph/sync/graphSync.js' })).names.length).toBeGreaterThan(0);
             expect((await fileExists({ file: 'core/graph/sync/graphSync.js' })).exists).toBe(true);
         });
+    });
+
+    // backlog/cli-snelheid.md: these load only what they need (no yaml, no MCP SDK, no graph), so they stay near bare Node
+    it('lens v and lens status as a new process stay within budget', async () => {
+        const run = (...args) => () => expect(spawnSync(process.execPath, [LENS_BIN, ...args], { env: { ...process.env, LENS_NODE_CHILD: '1' }, windowsHide: true }).status).toBe(0);
+        await withinBudget('process: lens v', run('v'));
+        await withinBudget('process: lens status', run('status'));
     });
 
     it('a deliberate slowdown over the budget fails the gate (J4)', async () => {

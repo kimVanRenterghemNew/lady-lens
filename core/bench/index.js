@@ -7,5 +7,5 @@ export { runBench, measurePhases } from './runBench.js';
 export { formatRun } from './report.js';
 export { benchCommand, compareCommand, lensIdentity } from './command.js';
 export { generateScaleRepo, seededRandom, SCALE_PROFILES } from './scaleRepo.js';
-export { lensAsk, daemonStart, untilPrinted } from './processTimes.js';
+export { lensAsk, daemonStart, untilPrinted, LENS_BIN } from './processTimes.js';
 export { sampleFile } from './operations.js';

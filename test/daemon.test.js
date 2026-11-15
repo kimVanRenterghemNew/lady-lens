@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { spawn } from 'child_process';
 import { describe, expect, it } from 'vitest';
 import {
     writeDaemonInfo,
@@ -16,6 +17,7 @@ import {
     arePortsBusy,
     DAEMON_FILE
 } from '../core/mcp/index.js';
+import { parseListening } from '../core/daemon/index.js';
 
 describe('daemon management', () => {
     it('writes, reads, and clears daemon info', () => {
@@ -78,6 +80,41 @@ describe('daemon management', () => {
         clearDaemonInfo(file);
         fs.rmSync(tmpDir, { recursive: true, force: true });
     });
+
+    // found 2026-11-15 on Linux CI: the netstat lines and a real stop never ran there, so daemon.js fell under 70% branches
+    it('reads the PIDs that listen on the asked ports from netstat output, once each', () => {
+        const output = [
+            '  Proto  Local Address          Foreign Address        State           PID',
+            '  TCP    127.0.0.1:4318         0.0.0.0:0              LISTENING       100',
+            '  TCP    [::1]:4318             [::]:0                 LISTENING       100',
+            '  TCP    127.0.0.1:4317         0.0.0.0:0              LISTENING       200',
+            '  TCP    127.0.0.1:9999         0.0.0.0:0              LISTENING       300',
+            '  TCP    127.0.0.1:4318         127.0.0.1:50000        ESTABLISHED     400'
+        ].join('\r\n');
+        expect(parseListening(output, [4318, '4317'])).toEqual([100, 200]);
+        expect(parseListening('', [4318])).toEqual([]);
+    });
+
+    it('stops a tracked extra PID, then the daemon and the rest it tracks: only processes this test started', async () => {
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-daemon-stop-'));
+        const file = path.join(tmpDir, 'daemon.json');
+        const sleeper = () => spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true });
+        const [main, extra, second] = [sleeper(), sleeper(), sleeper()];
+        const gone = child => new Promise(resolve => (child.exitCode !== null || child.signalCode ? resolve() : child.once('exit', resolve)));
+        try {
+            writeDaemonInfo({ pid: main.pid, pids: [main.pid, extra.pid, second.pid], mcpPort: 1, uiPort: 2, repo: '/test' }, file);
+            expect(stopDaemonPid(extra.pid, file)).toMatchObject({ stopped: true, pid: extra.pid });
+            await gone(extra);
+            expect(readDaemonInfo(file).pids).toEqual([main.pid, second.pid]);
+
+            expect(daemonCommand('stop', [], file)).toMatchObject({ code: 0, text: `Stopped lady-lens daemon (PID: ${main.pid})` });
+            await Promise.all([gone(main), gone(second)]);
+            expect(fs.existsSync(file)).toBe(false);
+        } finally {
+            [main, extra, second].forEach(child => { try { child.kill(); } catch { /* gone */ } });
+            fs.rmSync(tmpDir, { recursive: true, force: true });
+        }
+    }, 30_000);
 
     it('handles stopDaemon cleanly when not running or stale', () => {
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-daemon-test-'));

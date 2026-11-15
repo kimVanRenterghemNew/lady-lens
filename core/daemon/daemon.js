@@ -2,8 +2,7 @@
  * Daemon process management for lady-lens MCP and UI servers.
  * Handles recording PID/ports and stopping background daemons.
  * TODO(coverage): Current line coverage is 70.27% (< 85% target). Raise to >= 85%.
- *
- * @module core/mcp/daemon
+ * @module core/daemon/daemon
  */
 import fs from 'fs';
 import net from 'net';
@@ -58,14 +57,18 @@ export function isProcessRunning(pid) {
     }
 }
 
+/** The PIDs listening on `ports` in Windows' `netstat -ano` output (apart, so every platform can test it). */
+export function parseListening(output, ports) {
+    const wanted = new Set(ports.map(Number));
+    return [...new Set(String(output).split(/\r?\n/).flatMap(line => {
+        const match = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/i);
+        return match && wanted.has(Number(match[1])) ? [Number(match[2])] : [];
+    }))];
+}
+
 export function listeningPids(ports) {
     try {
-        const output = execSync('netstat -ano -p tcp', { encoding: 'utf8', windowsHide: true });
-        const wanted = new Set(ports.map(Number));
-        return [...new Set(output.split(/\r?\n/).flatMap(line => {
-            const match = line.match(/^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/i);
-            return match && wanted.has(Number(match[1])) ? [Number(match[2])] : [];
-        }))];
+        return parseListening(execSync('netstat -ano -p tcp', { encoding: 'utf8', windowsHide: true }), ports);
     } catch {
         return [];
     }

@@ -289,7 +289,7 @@ lens bench --repo C:\git\my-project    # your own repository: temporary database
 LENS_PROFILE=1 lens sync               # the phases of one real sync, on stderr
 ```
 
-Traces: `LENS_TRACE_FILE=<file>` writes one JSON line per span (`trace_id`, `span_id`, `parent_span_id`, `name`, `duration_ms`, `status`, `attributes`), the same shape as Kura's `outputs/traces.jsonl`. A CLI command is the root span (with `node.startup_ms`: Node plus the static imports); below it `load modules`, `tool: <name>`, `freshness: status` and `freshness: sync`, `query: load graph` and every step of a sync. In the daemon each tool call is its own trace. A caller that sets `TRACEPARENT` (W3C, `00-<trace id>-<span id>-01`) gets lens's spans in its own trace; point `LENS_TRACE_FILE` at the caller's file to see them together.
+Traces: `LENS_TRACE_FILE=<file>` writes one JSON line per span (`trace_id`, `span_id`, `parent_span_id`, `name`, `duration_ms`, `status`, `attributes`), the same shape as Kura's `outputs/traces.jsonl`. A CLI command is the root span (with `node.startup_ms`: Node plus the static imports); below it `load modules`, `tool: <name>`, `freshness: status` and `freshness: sync`, `query: load graph` and every step of a sync. In the daemon each tool call is its own trace. A caller that sets `TRACEPARENT` (W3C, `00-<trace id>-<span id>-01`) gets lens's spans in its own trace; point `LENS_TRACE_FILE` at the caller's file to see them together. A `lens ask` answered by the daemon sends its span as the `traceparent` header, so the daemon's spans (when it was started with `LENS_TRACE_FILE`) hang under it.
 
 ```
 $env:LENS_TRACE_FILE = "$HOME\.lady-lens\logs\traces.jsonl"; lens ask graph_query '{"query":"queue"}'

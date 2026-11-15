@@ -66,6 +66,11 @@ if (command === 'update' || command === 'node') { const update = await import('.
 if (command === 'mendix-export') { await (await import('../core/graph/index.js')).runMdlExport(rest[0]); process.exit(0); }
 // in a temporary database: the registry and the repository's own database stay as they are
 if (command === 'bench') { const bench = await import('../core/bench/index.js'); const outDir = path.join(HOME, 'bench', id); const out = rest[0] === 'compare' ? bench.compareCommand({ outDir, against: flag('--against') }) : await bench.benchCommand({ root: repo, outDir, repoKey: `repo:${id}`, runs: Number(flag('--runs')) || 5, baseline: has('--baseline'), processes: !has('--no-processes'), json: has('--json'), log: label => process.stderr.write(`  ${label}\n`) }); await print(out.text); process.exit(out.ok ? 0 : 1); }
+if (['ps', 'status', 'stop'].includes(command)) {
+    const { daemonCommand } = await import('../core/daemon/index.js'); // light: before lady-lens is loaded below
+    const out = daemonCommand(command === 'status' ? 'ps' : command, rest); // status was in the help but printed the usage
+    console.log(out.text); process.exit(out.code);
+}
 // a running daemon answers without loading lady-lens here; it uses the registered database, so not with --db or another one
 const answer = command === 'ask' && existingEntry && targetDb === existingEntry.database ? await askDaemon({ home: HOME, repo, tool: rest[0], json: rest[1] }) : null;
 if (answer) { await (answer.code ? console.error(answer.text) : print(answer.text)); process.exit(answer.code); }
@@ -84,11 +89,6 @@ if (command === 'remove') {
     const { removed, repo: entry } = repoRemove({ repo: target });
     console.log(removed ? `Removed ${entry.id} ${entry.path}` : `Repository not found: ${target}`);
     process.exit(0);
-}
-if (['ps', 'status', 'stop'].includes(command)) {
-    const { daemonCommand } = await import('../core/mcp/index.js');
-    const out = daemonCommand(command === 'status' ? 'ps' : command, rest); // status was in the help but printed the usage
-    console.log(out.text); process.exit(out.code);
 }
 
 // stdio: no process.exit here, the server keeps reading stdin after runMcpServer returns

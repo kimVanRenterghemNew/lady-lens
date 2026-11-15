@@ -1,6 +1,6 @@
 {
   "name": "lady-lens",
-  "version": "1.6.8",
+  "version": "1.6.11",
   "description": "Kura's code graph for any JavaScript repository: definitions, imports, function view, decisions. Local, on Ladybug.",
   "license": "GPL-3.0-or-later",
   "author": "Kim Van Renterghem <kim.van.renterghem@gmail.com>",
@@ -71,7 +71,7 @@
     "lint:report": "eslint . --format json --output-file outputs/lint/eslint.json",
     "lens": "node bin/lens.mjs",
     "mcp": "node bin/lens.mjs mcp",
-    "pack": "npm pack --pack-destination dist",
+    "pack": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && npm pack --pack-destination dist",
     "eval:graph": "node evals/graphEval.mjs",
     "bench": "node scripts/benchmark.mjs",
     "test:perf": "node scripts/perf.mjs",

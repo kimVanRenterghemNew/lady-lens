@@ -25,7 +25,7 @@ const calls = git => ({
     headInfo: git.headInfo(),
     commitInfo: [git.commitInfo('main'), git.commitInfo('f1'), git.commitInfo('nope')],
     fileLog: [git.fileLog('main', 'a.js'), git.fileLog('feature', 'c.js'), git.fileLog('main', 'nope.js'), git.fileLog('main', 'a.js', { max: 1 })],
-    commitFiles: [git.commitFiles(), git.commitFiles(2)],
+    commitFiles: [git.commitFiles(), git.commitFiles(2), git.commitFiles(1000, { since: 'main~2' }), git.commitFiles(1000, { since: 'main' })],
     commitsWithFiles: [git.commitsWithFiles(), git.commitsWithFiles(2)],
     branches: git.listBranches(),
     tree: [git.listTree('main'), git.listTree('feature'), git.listTree('nope')],

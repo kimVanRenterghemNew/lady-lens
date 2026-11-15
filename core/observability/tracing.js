@@ -23,10 +23,20 @@ const traceFile = () => lensEnv('TRACE_FILE') || null;
 /** @returns {boolean} whether spans are written */
 export const isTracing = () => Boolean(traceFile());
 
-/** The caller's span from `TRACEPARENT`, or null. */
-function remoteParent(env = process.env) {
-    const match = /^[\da-f]{2}-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/.exec(String(env.TRACEPARENT || '').trim());
+/** The caller's span from a W3C `traceparent` value, or null. */
+function parseTraceParent(value) {
+    const match = /^[\da-f]{2}-([\da-f]{32})-([\da-f]{16})-[\da-f]{2}$/.exec(String(value || '').trim());
     return match ? { traceId: match[1], spanId: match[2] } : null;
+}
+const remoteParent = (env = process.env) => parseTraceParent(env.TRACEPARENT);
+
+/**
+ * Run `fn` with the caller's span from the request's `traceparent` header as parent: a `lens ask` answered by the daemon
+ * shows the daemon's spans under the CLI's span. Without a valid header `fn` runs as is.
+ */
+export function withTraceParent(headers, fn) {
+    const parent = isTracing() && parseTraceParent(headers?.traceparent);
+    return parent ? context.run(parent, fn) : fn();
 }
 
 function write(line) {

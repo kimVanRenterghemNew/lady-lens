@@ -1,4 +1,4 @@
-export { coChangeRelations } from './gitHistory.js';
+export { coChangeRelations, commitFilesCached } from './gitHistory.js';
 export { recordHead, commitNodeId, branchNodeId } from './headCommit.js';
 export { createGraphSync, isProjectGraphEnabled } from './graphSync.js';
 export { indexBranch, branchScope } from './branchIndex.js';

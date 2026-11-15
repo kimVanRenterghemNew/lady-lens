@@ -1,5 +1,5 @@
 /**
- * Measuring before optimizing (backlog/meten-voor-optimaliseren.md): repeated runs with a median, runs saved without
+ * Measuring before optimizing (done in 1.6.0, README > Performance): repeated runs with a median, runs saved without
  * paths or code, a comparison that marks a regression and warns about another machine, a bench of an unknown
  * repository that leaves the registry and its database alone, budgets that only get stricter, reproducible scale repos.
  */

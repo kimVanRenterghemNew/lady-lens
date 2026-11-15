@@ -9,7 +9,7 @@ import path from 'path';
 import { REPO_ROOT, lensEnv } from '../../configuration/index.js';
 import { loadProjectSettings, scanGraphFiles } from '../../repository/index.js';
 import { createGraphRepository, PROJECT_SCOPE } from '../repository/index.js';
-import { coChangeRelations } from './gitHistory.js';
+import { coChangeRelations, historyFile } from './gitHistory.js';
 import { createGit } from '../../git/index.js';
 import { recordHead } from './headCommit.js';
 import { entityFor, entryPointsFrom, dependencyNodesOf } from './fileEntity.js';
@@ -22,8 +22,8 @@ const toPosix = (value) => String(value).replace(/\\/g, '/');
 const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
 export const isProjectGraphEnabled = (env = process.env) => lensEnv('PROJECT_GRAPH', env) !== '0';
 const isIndexable = (file) => isCodeFile(file) || isDocFile(file) || isConfigFile(file);
-/** Bumped when the facts of a file gain a field or its kind is judged differently (8: x.config.* is a script; 9: complexity counted as ESLint does, callbacks; 10: commentWords): every file is then re-read once, also when its content did not change. */
-export const FACTS_VERSION = 11;
+/** Bumped when the facts of a file gain a field or its kind is judged differently (8: x.config.* is a script; 9: complexity counted as ESLint does, callbacks; 10: commentWords; 12: a title line's purpose includes the next paragraph; 13: also a name with an aside and a period): every file is then re-read once, also when its content did not change. */
+export const FACTS_VERSION = 13;
 const FILE_TYPES = new Set(['CodeFile', 'Document', 'Config']);
 /**
  * @param {{root?: string, repository?: object, settings?: object, now?: () => number, contribute?: boolean}} [options]
@@ -108,7 +108,7 @@ export function createGraphSync({ root = REPO_ROOT, repository = createGraphRepo
         const counted = result => `${result.nodes.length} nodes, ${result.relations.length} relations`;
         const extra = contribute ? await debugStep('sync', 'host contributors', () => contributed(root, merged, stamp), counted) : none;
         const mendix = contribute ? await debugStep('sync', 'mendix', () => mendixContributor({ root }), counted) : none;
-        const coChange = await debugStep('sync', 'co-change (git history)', () => coChangeRelations(git ?? createGit({ root }), new Set([...merged.keys()].filter(file => merged.get(file).type === 'CodeFile')), { now: stamp }), list => `${list.length} relations`);
+        const coChange = await debugStep('sync', 'co-change (git history)', () => coChangeRelations(git ?? createGit({ root }), new Set([...merged.keys()].filter(file => merged.get(file).type === 'CodeFile')), { now: stamp, cacheFile: historyFile(repository) }), list => `${list.length} relations`);
         const nodes = [...upserts, ...dependencyNodes, ...extra.nodes, ...mendix.nodes];
         // every write carries the whole contribution: a contributed node it no longer has (a deleted page) goes
         const fresh = new Set(nodes.map(node => node.path));

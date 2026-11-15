@@ -6,7 +6,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { debugStep, traceAsync, startSpan } from '../core/observability/index.js';
+import { debugStep, traceAsync, startSpan, withTraceParent } from '../core/observability/index.js';
 
 let dir;
 let file;
@@ -48,6 +48,14 @@ describe('traces', () => {
         process.env.TRACEPARENT = `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`;
         startSpan('tool: graph_query').end();
         expect(spans()[0]).toMatchObject({ trace_id: 'a'.repeat(32), parent_span_id: 'b'.repeat(16) });
+    });
+
+    it('a daemon request joins the CLI\'s trace through its traceparent header, and runs as is without one', async () => {
+        process.env.LENS_TRACE_FILE = file;
+        await withTraceParent({ traceparent: `00-${'c'.repeat(32)}-${'d'.repeat(16)}-01` }, () => traceAsync('tool: definedIn', {}, () => 1));
+        expect(await withTraceParent({ traceparent: 'garbage' }, () => 2)).toBe(2);
+        expect(await withTraceParent(undefined, () => 3)).toBe(3);
+        expect(spans()[0]).toMatchObject({ name: 'tool: definedIn', trace_id: 'c'.repeat(32), parent_span_id: 'd'.repeat(16) });
     });
 
     it('lens tools: the command is the root span, loading the modules its child', () => {

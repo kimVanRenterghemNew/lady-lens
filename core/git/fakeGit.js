@@ -77,6 +77,9 @@ export function createFakeGit(state = null) {
     const touching = (commitList, file) => commitList.filter(commit => commit.parents.length < 2 && changedPaths(commit).includes(file));
     const sideChanges = (base, tip) => new Map([...new Set([...base.keys(), ...tip.keys()])].filter(file => base.get(file) !== tip.get(file)).map(file => [file, tip.get(file)]));
 
+    const commitsFrom = since => (since ? range(since, headSha) ?? [] : newestFirst(reachable(headSha)));
+    const filesOf = commit => (commit.parents.length > 1 ? [] : changedPaths(commit));
+
     const git = {
         currentBranch: () => state.head ?? null,
         resolveCommit: ref => resolve(ref),
@@ -109,7 +112,7 @@ export function createFakeGit(state = null) {
         commitInfo: ref => info(commits.get(resolve(ref))),
         fileLog: (ref, file, { max = 30 } = {}) => { const sha = resolve(ref); return sha ? touching(newestFirst(reachable(sha)), file).slice(0, max).map(info) : []; },
         commitsWithFiles: (max = 1000) => (headSha ? newestFirst(reachable(headSha)).slice(0, max).map(withFiles) : []),
-        commitFiles: (max = 1000) => (headSha ? newestFirst(reachable(headSha)).slice(0, max).map(commit => (commit.parents.length > 1 ? [] : changedPaths(commit))) : []),
+        commitFiles: (max = 1000, { since } = {}) => (headSha ? commitsFrom(since).slice(0, max).map(filesOf) : []),
         listBranches: () => Object.keys(state.branches).sort(),
         listTree: ref => { const tree = treeOf(ref); return tree ? [...tree.keys()].sort() : null; },
         readBlobs: (ref, paths) => new Map(paths.map(file => [file, treeOf(ref)?.get(file) ?? null])),

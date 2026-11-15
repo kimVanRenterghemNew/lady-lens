@@ -29,6 +29,13 @@
     "core/configuration/paths.js": {
       "toRepoRelative#1": 7
     },
+    "core/daemon/daemon.js": {
+      "daemonCommand#1": 8,
+      "existingDaemonMessage#1": 7,
+      "readDaemonInfo#1": 6,
+      "stopDaemon#1": 10,
+      "stopDaemonPid#1": 9
+    },
     "core/discussions/mcp/discussionTools.js": {
       "handleDiscussionQuery#1": 12
     },
@@ -73,7 +80,6 @@
       "treeDiff#1": 7
     },
     "core/git/index.js": {
-      "commitFiles#1": 8,
       "readBlobs#1": 9
     },
     "core/graph/adapters/ladybug/configIndexer.js": {
@@ -93,7 +99,7 @@
       "documentReferences#1": 6
     },
     "core/graph/adapters/ladybug/repositoryStore.js": {
-      "applyProjectChanges#1": 10,
+      "applyProjectChanges#1": 7,
       "Async arrow function#1": 8,
       "Async arrow function#2": 11,
       "openWithLockRetry#1": 6
@@ -167,7 +173,6 @@
       "Arrow function#1": 13,
       "Arrow function#2": 12,
       "Arrow function#3": 20,
-      "extractPurpose#1": 8,
       "isFunctionMember#1": 9
     },
     "core/graph/sync/fileEntity.js": {
@@ -184,7 +189,7 @@
       "write#1": 7
     },
     "core/graph/sync/headCommit.js": {
-      "recordHead#1": 15
+      "recordHead#1": 14
     },
     "core/graph/sync/languages/blocks.js": {
       "findIndentedBlockEnd#1": 8
@@ -225,13 +230,6 @@
       "runSkillInstall#1": 13,
       "serverEntry#1": 6,
       "update#1": 6
-    },
-    "core/mcp/daemon.js": {
-      "daemonCommand#1": 8,
-      "existingDaemonMessage#1": 7,
-      "readDaemonInfo#1": 6,
-      "stopDaemon#1": 10,
-      "stopDaemonPid#1": 9
     },
     "core/mcp/handlers/config.js": {
       "Arrow function#1": 13,

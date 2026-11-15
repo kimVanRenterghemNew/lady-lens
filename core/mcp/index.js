@@ -26,7 +26,7 @@ export {
     isProcessRunning,
     arePortsBusy,
     existingDaemonMessage
-} from './daemon.js';
+} from '../daemon/index.js';
 export {
     DISCUSSION_TOOL_SCHEMAS,
     handleDiscussionBuild,

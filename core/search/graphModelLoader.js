@@ -138,16 +138,11 @@ export async function refreshProjectGraph({ force = false } = {}) {
         // no db yet
     }
     try {
-        const sync = createGraphSync();
-        const status = await debugStep('freshness', 'status', () => sync.status(), result => (result.stale ? 'stale' : 'fresh'));
+        // the sync itself finds whether anything changed: a status first scanned every file twice (~390 ms per call)
+        const result = await debugStep('freshness', 'sync', () => createGraphSync().sync(), done => (done.wrote ? 'synced' : 'fresh'));
         lastFreshnessCheck = Date.now();
-        if (!status.stale) {
-            lastFreshnessResult = { checked: true, synced: false };
-            return lastFreshnessResult;
-        }
-        await debugStep('freshness', 'sync', () => sync.sync());
-        invalidateGraphCache();
-        lastFreshnessResult = { checked: true, synced: true };
+        if (result.wrote) invalidateGraphCache();
+        lastFreshnessResult = { checked: true, synced: Boolean(result.wrote) };
         return lastFreshnessResult;
     } catch (error) {
         lastFreshnessCheck = Date.now();

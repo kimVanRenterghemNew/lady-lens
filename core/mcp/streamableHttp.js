@@ -1,6 +1,7 @@
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { createLadyLensMcpServer } from './server.js';
 import { findRegisteredRepo } from '../repository/index.js';
+import { withTraceParent } from '../observability/index.js';
 
 export async function handleStreamableHttpRequest(req, res, { defaultRepo, createServer = createLadyLensMcpServer, createTransport = () => new StreamableHTTPServerTransport({ sessionIdGenerator: undefined }) }) {
     // Stateless: no session can receive server-initiated messages, so a GET event stream would only hang open.
@@ -23,7 +24,7 @@ export async function handleStreamableHttpRequest(req, res, { defaultRepo, creat
     const transport = createTransport();
     try {
         await streamableServer.connect(transport);
-        await transport.handleRequest(req, res);
+        await withTraceParent(req.headers, () => transport.handleRequest(req, res));
     } catch (error) {
         if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' });
         if (!res.writableEnded) res.end(JSON.stringify({ error: error.message }));

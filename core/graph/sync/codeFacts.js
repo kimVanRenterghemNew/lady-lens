@@ -6,8 +6,9 @@
 import { parse } from 'acorn';
 import { extractFunctionComplexities, extractCallbackComplexities } from './functionComplexity.js';
 import { detectFileSmells } from './fileSmells.js';
+import { extractPurpose } from './filePurpose.js';
 
-const MAX_PURPOSE_CHARS = 240;
+
 const MAX_DEEP_SYMBOLS = 120;
 const NOISY_NAMES = new Set(['result', 'results', 'error', 'value', 'values', 'index', 'items', 'input', 'output', 'options', 'args', 'data', 'text', 'path', 'file', 'files', 'line', 'lines', 'node', 'nodes', 'edge', 'edges', 'name', 'type', 'key', 'keys', 'content', 'response', 'request', 'match', 'matches', 'count', 'total', 'state', 'config', 'context', 'handler']);
 
@@ -26,20 +27,6 @@ export const fileKindOf = (relativePath, { scriptPaths = DEFAULT_SCRIPT_PATHS } 
 
 /** Config files the code names in a string (`'configs/models.yaml'`, `"package.json"`): their file names, once each. */
 export const configFilesNamed = (source) => [...new Set([...String(source).matchAll(/['"`]([^'"`\s]*?([\w.-]+\.(?:ya?ml|json)))['"`]/g)].map(m => m[2]))].sort();
-
-export function extractPurpose(raw) {
-    // `.` does not match `\r`: with CRLF line endings a `//` header was never seen
-    const source = String(raw).replace(/\r\n?/g, '\n');
-    // the header at the top wins (a `//` header over a function's doc comment further down); else the first doc comment
-    const top = source.replace(/^#!.*\n/, '').replace(/^\s+/, '');
-    const lineHeader = top.match(/^(?:\/\/.*(?:\n|$))+/)?.[0];
-    const doc = lineHeader ? null : source.match(/\/\*\*([\s\S]*?)\*\//);
-    const text = doc
-        ? doc[1].split('\n').map(line => line.replace(/^\s*\* ?/, '').trim())
-        : (lineHeader || source.match(/^(?:\/\/.*\n)+/)?.[0] || '').split('\n').map(line => line.replace(/^\/\/\s?/, '').trim());
-    const firstParagraph = text.join('\n').trim().split(/\n\s*\n/)[0] || '';
-    return firstParagraph.replace(/\s+/g, ' ').slice(0, MAX_PURPOSE_CHARS);
-}
 
 function declaredNames(declaration) {
     if (!declaration) return [];

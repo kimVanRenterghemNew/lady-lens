@@ -1,6 +1,10 @@
 import os from 'os';
 import { defineConfig, configDefaults } from 'vitest/config';
 
+// Reading a Mendix model needs node:sqlite (Node 22.13+). On an older Node (CI's Node 20) those tests are skipped, so
+// that code is left out of the coverage there instead of failing the thresholds; the thresholds themselves stay.
+const hasSqlite = (() => { try { return Boolean(process.getBuiltinModule?.('node:sqlite')); } catch { return false; } })();
+
 // Same isolation as the app: every worker its own Ladybug database; the developer's real graph is never opened.
 export default defineConfig({
     test: {
@@ -14,7 +18,7 @@ export default defineConfig({
         coverage: {
             provider: 'v8',
             include: ['core/**/*.js', 'ui/**/*.mjs'],
-            exclude: [ "**/index.js" ],
+            exclude: ['**/index.js', ...(hasSqlite ? [] : ['core/mendix/**', 'core/graph/sync/mendixExport.js'])],
             reportsDirectory: 'outputs/coverage',
             // json-summary: `health` reads it (outputs/coverage/coverage-summary.json), so a file covered through another counts as tested
             reporter: ['text', 'html', 'clover', 'json', 'json-summary'],

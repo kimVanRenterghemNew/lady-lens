@@ -31,7 +31,7 @@ export async function recordHead({ repository, git, wrote = true, now = new Date
 
     const branches = await repository.loadNodes({ types: ['Branch'], scopes: [PROJECT_SCOPE] });
     const previous = branches.find(node => node.id === branchNodeId(branch))?.metadata?.head || null;
-    const commitsSince = previous && git.resolveCommit(previous) ? git.countRange(previous, head.sha) : null;
+    const commitsSince = previous ? git.countRange(previous, head.sha) : null; // null too when `previous` is gone (rebased away)
     const result = { sha: head.sha, branch, commit: head.sha.slice(0, 7), previous: previous ? previous.slice(0, 7) : null, commitsSince };
     if (!wrote && previous === head.sha) return result;
 

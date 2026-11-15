@@ -49,7 +49,7 @@ Afgedwongen met tests: alleen `core/graph/adapters/ladybug/ladybugGraphStore.js`
 | `session:<id>` | `Discussion` en de stubs van hun bronnen | `saveDiscussion`, `editDiscussion` | `discussion_query`, `graph_query` met `sessionId` |
 | `branch:<naam>` 🗺️ | inhoud van een branch zonder uitchecken | `repo_sync({ branch })` | `branch_diff`, `branch_impact` |
 
-Bij elke incrementele sync worden verwijderde bestanden uit `project` gehaald (`DETACH DELETE` op `scope` en `path`, relaties van die knooppunten verdwijnen mee), gewijzigde bestanden opnieuw geïndexeerd en **alle** projectrelaties opnieuw afgeleid.
+Bij elke incrementele sync worden verwijderde bestanden uit `project` gehaald (`DETACH DELETE` op `scope` en `path`, relaties van die knooppunten verdwijnen mee), gewijzigde bestanden opnieuw geïndexeerd en **alle** projectrelaties opnieuw afgeleid. Geschreven wordt alleen het verschil met wat er staat: nieuwe relaties en relaties met een andere `confidence` of een ander gewicht, en relaties die niet meer afgeleid worden verdwijnen (`relationDelta` in de Ladybug-adapter). Een relatie die gelijk blijft, houdt haar `created_at` en `updated_at`; een incrementele sync laat dezelfde relaties achter als een volledige (`test/graphSyncDelta.test.js`).
 
 ---
 
