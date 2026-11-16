@@ -6,6 +6,7 @@ export {
     REGISTRY_FILE,
     idOfRepo,
     canonicalRepoPath,
+    samePath,
     databasePathOfRepo,
     readRegistry,
     writeRegistry,
@@ -16,3 +17,9 @@ export {
     resolveRepoTarget,
     currentGitBranch
 } from './registry.js';
+export {
+    rootCommitOf,
+    originUrlOf,
+    groupRegisteredRepos,
+    resolveRefTarget
+} from './groups.js';

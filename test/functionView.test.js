@@ -3,7 +3,7 @@
  * what its file is for, who calls it, which tests use it, which stories name it; nothing else of the file.
  * Nulmeting 2026-10-29: the app 0/3 on these questions (the test was missing: tests import a module through index.js).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createGraph, functionView } from '../core/graph/index.js';
 
 const FILES = {
@@ -87,6 +87,15 @@ describe('functionView', () => {
     it('MUST say not found for an unknown name instead of guessing', () => {
         expect(functionView(fixture(), 'doesNotExist', { readFile })).toMatchObject({ found: false, definitions: [], callers: [], tests: [] });
     });
+
+    it('MUST NOT read caller source files from disk when call sites are in the graph (AC4)', () => {
+        const graph = fixture();
+        graph.nodes.get('file:core/h/handler.js').calls = [['run', 'applyAnswers', 2, '../q/index.js']];
+        const spy = vi.fn(readFile);
+        const view = functionView(graph, 'applyAnswers', { readFile: spy });
+        expect(view.callers.find(c => c.path === 'core/h/handler.js')).toMatchObject({ path: 'core/h/handler.js', lines: [2] });
+        expect(spy).not.toHaveBeenCalledWith('core/h/handler.js');
+    });
 });
 
 describe('functionView: classes in other languages, given facts and unreadable files', () => {
@@ -117,5 +126,36 @@ describe('functionView: classes in other languages, given facts and unreadable f
 
     it('a definition file that cannot be read has no children', () => {
         expect(functionView(classGraph(), 'Base', { readFile: () => null }).children).toBeUndefined();
+    });
+
+    it('handles JS class parsing, functions matching symbol name, startLine without loc, and empty shapes', () => {
+        const graph = createGraph('js');
+        const jsText = 'class Service {\n  Service() {}\n  start() {}\n}\n';
+        graph.addNode('file:src/Service.js', 'CodeFile', { path: 'src/Service.js', exports: ['Service'], symbolRanges: { Service: [1, 4] } });
+        const view = functionView(graph, 'Service', { readFile: () => jsText });
+        expect(view.children).toEqual([{ name: 'start', path: 'src/Service.js', line: 3 }]);
+        expect(view.inheritors).toBeUndefined();
+
+        // startLine / endLine without loc
+        const graph2 = createGraph('js2');
+        graph2.addNode('file:src/Worker.js', 'CodeFile', {
+            path: 'src/Worker.js',
+            exports: ['Worker'],
+            symbolRanges: { Worker: [1, 4] },
+            functions: [{ name: 'work', startLine: 2, endLine: 3 }]
+        });
+        const view2 = functionView(graph2, 'Worker', { readFile: () => 'class Worker {\n  work() {}\n}\n' });
+        expect(view2.children).toEqual([{ name: 'work', path: 'src/Worker.js', line: 2 }]);
+
+        // class with no children and no inheritors
+        const graph3 = createGraph('js3');
+        graph3.addNode('file:src/Empty.js', 'CodeFile', {
+            path: 'src/Empty.js',
+            exports: ['Empty'],
+            symbolRanges: { Empty: [1, 2] }
+        });
+        const view3 = functionView(graph3, 'Empty', { readFile: () => 'class Empty {}\n' });
+        expect(view3.children).toBeUndefined();
+        expect(view3.inheritors).toBeUndefined();
     });
 });

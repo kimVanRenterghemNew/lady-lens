@@ -74,7 +74,7 @@ export const RESEARCH_TOOL_SCHEMAS = [
     },
     {
         name: 'functionView',
-        description: 'What does this function do, who calls it, which tests use it, which stories name it? Definition with lines and purpose, callers, tests (with test names), stories, bound (`resolved`) and unbound (`unresolved`) call counts; for a class also its methods (`children`) and subclasses (`inheritors`); only this function, not the whole file.',
+        description: 'What does this function do, who calls it, which tests use it, which stories name it? Definition with lines and purpose, parameter seams (methods/properties called on parameters), callers, tests (with test names), stories, bound (`resolved`) and unbound (`unresolved`) call counts; for a class also its methods (`children`) and subclasses (`inheritors`); only this function, not the whole file.',
         parameters: { type: 'object', properties: { symbol: { type: 'string', description: 'The exact identifier' }, maxSites: { type: 'integer', description: 'Lines per caller, test and story (default 5, at most 200)' } }, required: ['symbol'] }
     },
     {

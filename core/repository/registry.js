@@ -22,7 +22,7 @@ export function canonicalRepoPath(repoPath) {
     if (!resolved.includes('~')) return resolved;
     try { return fs.realpathSync.native(resolved); } catch { return resolved; }
 }
-const samePath = (a, b) => canonicalRepoPath(a).toLowerCase() === canonicalRepoPath(b).toLowerCase();
+export const samePath = (a, b) => canonicalRepoPath(a).toLowerCase() === canonicalRepoPath(b).toLowerCase();
 
 export function idOfRepo(repoPath) {
     const normalized = canonicalRepoPath(repoPath).toLowerCase();

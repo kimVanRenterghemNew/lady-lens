@@ -27,8 +27,7 @@ const id = idOfRepo(repo);
 const dbFlag = flag('--db');
 const cfg = [flag('--config'), process.env.LENS_SETTINGS_PATH, 'config.json', 'lens.config.json', '.lady-lens.json', '.lady-lens.yaml']
     .map(p => p && (path.isAbsolute(p) ? p : path.join(repo, p))).find(p => p && fs.existsSync(p));
-const readJsonFile = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return {}; } };
-const fileConfig = cfg ? readJsonFile(cfg) : {};
+const fileConfig = cfg ? (() => { try { return JSON.parse(fs.readFileSync(cfg, 'utf8')); } catch { return {}; } })() : {};
 if (fileConfig.env) Object.entries(fileConfig.env).forEach(([k, v]) => { if (!process.env[`LENS_${k}`] && !process.env[k]) process.env[`LENS_${k}`] = String(v); });
 
 const readRegistry = () => { try { return JSON.parse(fs.readFileSync(REGISTRY, 'utf8')); } catch { return { repos: {} }; } };
@@ -37,11 +36,7 @@ const existingEntry = registryData.repos[id];
 
 const explicitDb = dbFlag && (registryData.repos[dbFlag]?.database || (dbFlag.endsWith('.lbdb') ? path.resolve(dbFlag) : path.join(HOME, 'repos', dbFlag, 'graph.lbdb')));
 const configDb = fileConfig.database || fileConfig.db;
-const targetDb = process.env.LENS_GRAPH_DB
-    || explicitDb
-    || (configDb ? path.resolve(repo, configDb) : null)
-    || existingEntry?.database
-    || path.join(HOME, 'repos', id, 'graph.lbdb');
+const targetDb = process.env.LENS_GRAPH_DB || explicitDb || (configDb ? path.resolve(repo, configDb) : null) || existingEntry?.database || path.join(HOME, 'repos', id, 'graph.lbdb');
 process.env.LENS_REPO_ROOT = repo;
 configureLensRoot(repo); // core is imported above, before LENS_REPO_ROOT is set: without this the scan root was not `repo`
 process.env.LENS_GRAPH_DB = targetDb;
@@ -60,7 +55,16 @@ if (command === 'list') {
     for (const entry of Object.values(readRegistry().repos)) console.log(`${entry.id}  ${entry.path}  ${entry.nodes ?? '?'} nodes  last sync ${entry.lastSync ?? 'never'}`);
     process.exit(0);
 }
-if (command === 'install' || command === 'uninstall') { const { agentInstallCommand } = await import('../core/mcp/index.js'); const out = agentInstallCommand({ action: command, ids: rest.filter(a => !a.startsWith('-')), lensPath: fileURLToPath(import.meta.url), repo: repoExplicit ? repo : null, dryRun: has('--dry-run'), skill: has('--skill'), mendix: has('--mendix'), refresh: has('--refresh') }); console.log(out.text); process.exit(out.ok ? 0 : 1); }
+if (command === 'install' || command === 'uninstall') {
+    if (has('--hooks') || rest.includes('hooks')) {
+        const { hookInstallCommand } = await import('../core/git/index.js');
+        const out = hookInstallCommand({ action: command, repo: repoExplicit ? repo : process.cwd(), dryRun: has('--dry-run') });
+        console.log(out.text); process.exit(out.ok ? 0 : 1);
+    }
+    const { agentInstallCommand } = await import('../core/mcp/index.js');
+    const out = agentInstallCommand({ action: command, ids: rest.filter(a => !a.startsWith('-')), lensPath: fileURLToPath(import.meta.url), repo: repoExplicit ? repo : null, dryRun: has('--dry-run'), skill: has('--skill'), mendix: has('--mendix'), refresh: has('--refresh') });
+    console.log(out.text); process.exit(out.ok ? 0 : 1);
+}
 if (command === 'update' || command === 'node') { const update = await import('../core/update/index.js'); const daemonFile = path.join(HOME, 'daemon.json'); const out = command === 'node' ? update.lensNodeCommand(rest[0], { home: os.homedir(), daemonFile }) : update.runLensUpdate({ arg: rest.find(a => !a.startsWith('-')), lensPath: fileURLToPath(import.meta.url), daemonFile }); console.log(out.text); process.exit(out.ok ? 0 : 1); }
 // the MDL export of a Mendix project, started by a sync in the background (core/graph/sync/mendixExport.js)
 if (command === 'mendix-export') { await (await import('../core/graph/index.js')).runMdlExport(rest[0]); process.exit(0); }
@@ -79,15 +83,13 @@ const [{ RESEARCH_TOOLS, RESEARCH_TOOL_SCHEMAS, DASHBOARD_TOOLS }, { buildMcpToo
 if (command === 'add') {
     const { repoAdd, activateRepoContext } = await import('../core/mcp/index.js');
     const { registered, sync } = await repoAdd({ path: rest[0] || process.cwd(), ...(dbFlag && { database: targetDb }) }, { activate: activateRepoContext });
-    console.log(`Registered ${registered.id} ${registered.path} (${sync.nodes} nodes) -> database: ${registered.database}`);
-    process.exit(0);
+    console.log(`Registered ${registered.id} ${registered.path} (${sync.nodes} nodes) -> database: ${registered.database}`); process.exit(0);
 }
 if (command === 'remove') {
-    const target = rest[0];
-    if (!target) { console.error('usage: lens remove <id|dir>'); process.exit(1); }
+    if (!rest[0]) { console.error('usage: lens remove <id|dir>'); process.exit(1); }
     const { repoRemove } = await import('../core/mcp/index.js');
-    const { removed, repo: entry } = repoRemove({ repo: target });
-    console.log(removed ? `Removed ${entry.id} ${entry.path}` : `Repository not found: ${target}`);
+    const { removed, repo: entry } = repoRemove({ repo: rest[0] });
+    console.log(removed ? `Removed ${entry.id} ${entry.path}` : `Repository not found: ${rest[0]}`);
     process.exit(0);
 }
 
@@ -138,7 +140,7 @@ if (command === 'mcp' && !args.includes('--stdio')) {
     console.log(`lady-lens services listening:\n  MCP Link:     http://127.0.0.1:${actualPort}/mcp\n  Legacy SSE:   http://127.0.0.1:${actualPort}/sse\n  MCP Status:   http://127.0.0.1:${actualPort}/\n  UI Dashboard: http://127.0.0.1:${uiPort}/\n  Repo:         ${repo}`);
     if (!isChild) console.log(`  (Ctrl+C or 'lens stop' to stop)`);
 }
-const logSyncFailure = (err, debugLog) => debugLog && fs.appendFileSync(debugLog, `lens sync failed: ${err.stack}${err.cause ? `\ncause: ${err.cause.stack || err.cause}` : ''}\n`);
+const logSyncFailure = (err, log) => log && fs.appendFileSync(log, `lens sync failed: ${err.stack}\n`);
 function handleSyncError(err, debugLog) {
     logSyncFailure(err, debugLog);
     console.error(`lens sync fout: ${err.message}${debugLog ? `\n(debug log: ${debugLog})` : ''}`);
@@ -194,7 +196,4 @@ if (command === 'tools') {
     process.exit(0);
 }
 
-if (!['mcp', 'ui'].includes(command)) {
-    console.log('usage: lens <mcp|ui|sync|status|stop|list|add|remove|ask|tools|bench|install|uninstall|update|node|v|version> [options]');
-    process.exit(command ? 1 : 0);
-}
+if (!['mcp', 'ui'].includes(command)) { console.log('usage: lens <mcp|ui|sync|status|stop|list|add|remove|ask|tools|bench|install|uninstall|update|node|v|version> [options]'); process.exit(command ? 1 : 0); }

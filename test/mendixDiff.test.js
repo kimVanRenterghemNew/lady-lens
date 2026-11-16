@@ -83,9 +83,9 @@ describe.skipIf(!hasSqlite).each(['mpr-v1', 'mpr-v2'])('mendix_diff on %s', form
 
 describe('mendix_diff without a usable model', () => {
     it('reports missing arguments, unknown branches and a folder without .mpr', async () => {
-        expect(await mendixDiff({ from: 'main' })).toEqual({ error: 'from and to are required' });
+        expect(await mendixDiff({ from: 'main' })).toMatchObject({ schemaVersion: 1, error: 'from and to are required' });
         const git = { resolveCommit: ref => (ref === 'main' ? 'a' : null) };
-        expect(await mendixDiff({ from: 'main', to: 'nope', git })).toEqual({ error: 'unknown branch or commit: nope' });
+        expect((await mendixDiff({ from: 'main', to: 'nope', git })).error).toMatch(/branch "nope" not found in group folders/);
         const noBase = { resolveCommit: () => 'a', mergeBase: () => null };
         expect((await mendixDiff({ from: 'a', to: 'b', git: noBase })).error).toMatch(/no common history/);
         const noMpr = { resolveCommit: () => 'a', mergeBase: () => 'a', listTree: () => ['src/a.js'] };

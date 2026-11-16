@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { createLadyLensMcpServer, buildMcpToolSchemas, MCP_SERVER_INFO } from './server.js';
 import { handleStreamableHttpRequest } from './streamableHttp.js';
+import { createSyncQueue } from './syncQueue.js';
 import { resolveRepoTarget, idOfRepo } from '../repository/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -62,6 +63,16 @@ const MCP_ROUTES = {
         await handleStreamableHttpRequest(req, res, { defaultRepo: ctx.defaultRepo });
     },
 
+    async '/sync'(req, res, url, ctx) {
+        if (req.method !== 'POST') {
+            res.writeHead(405).end('Method Not Allowed');
+            return;
+        }
+        const repo = url.searchParams.get('repo') || ctx.defaultRepo;
+        res.writeHead(202, { 'Content-Type': 'application/json' }).end(JSON.stringify({ status: 'queued', repo }));
+        ctx.queueSync?.(repo);
+    },
+
     async '/sse'(req, res, _url, ctx) {
         if (req.method !== 'GET') {
             res.writeHead(405).end('Method Not Allowed');
@@ -108,6 +119,10 @@ export function createMcpHttpServer(opts) {
     const sessions = new Map();
     const toolSchemas = buildMcpToolSchemas();
     const resolved = resolveDefaultTarget(config.defaultRepo);
+    const syncQueue = config.syncQueue || createSyncQueue(async repo => {
+        const { createGraphSync } = await import('../graph/index.js');
+        return createGraphSync({ root: repo }).sync();
+    });
 
     let httpServer;
     const ctx = {
@@ -118,6 +133,8 @@ export function createMcpHttpServer(opts) {
         resolved,
         toolSchemas,
         port: config.port,
+        syncQueue,
+        queueSync: repo => syncQueue.trigger(repo),
         get httpServer() { return httpServer; }
     };
 

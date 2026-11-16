@@ -33,6 +33,7 @@ lens list                     # check that it is there
 ```
 lens install                  # MCP entry (stdio) in every agent found; or name one: lens install vscode
 lens install --skill          # the Lady-lens workflow skill for those agents
+lens install --hooks          # non-blocking Git post-commit hooks for background sync
 lens install --mendix         # the Mendix skill (search .mpr content via .mxcli/mdl, change it with mxcli)
 lens install skill-mendix vscode claude-code   # the same, only for those agents
 ```
@@ -111,7 +112,7 @@ Every tool that returns a list takes `limit`: how many items its main list holds
 | Tool | Answers |
 |---|---|
 | `definedIn` | where a function or name is defined, with lines |
-| `functionView` | what a function does: definition and lines, purpose, callers, tests (with test names), stories; bound (`resolved`) and unbound (`unresolved`) calls, with "niet bewezen leeg" when nothing is bound but the name appears; for a class its methods (`children`) and subclasses (`inheritors`); `maxSites` for more than 5 lines per file |
+| `functionView` | what a function does: definition and lines, purpose, parameter seams (`parameterSeams`: methods and properties accessed on parameters), callers, tests (with test names), stories; bound (`resolved`) and unbound (`unresolved`) calls, with "niet bewezen leeg" when nothing is bound but the name appears; for a class its methods (`children`) and subclasses (`inheritors`); `maxSites` for more than 5 lines per file |
 | `diff_impact` | what my change touches: the functions the work not committed yet (or a range `from`..`to`) changes, with callers, tests, complexity and test gaps, riskiest first |
 | `importedBy` / `imports` | who imports a file / what it imports |
 | `exports` | what a file exports |
@@ -124,7 +125,7 @@ Every tool that returns a list takes `limit`: how many items its main list holds
 | `config_update` | safely replace one config file and refresh its graph facts; supports `expectedHash` |
 | `repo_sync` | index the repository; records the branch and commit and reports `commitsSince`; `branch: "<name>"` indexes another branch into its own scope `branch:<name>` without checking it out |
 | `branch_diff` | what branch `to` changes since its merge-base with `from`: files and functions added, removed, modified, renamed, plus changed import and call relations |
-| `mendix_diff` | Mendix model changes of a branch, read from git (no checkout, no mxcli; old single-file .mpr and mprcontents/): commits, changed documents with module, folder, name and type, every added, deleted or modified element with each property before and after, and for a microflow or nanoflow the flow graph before and after with a status per node and sequence flow. Data for a client that shows it (an extension); needs Node 22.13+ (`lens node`) |
+| `mendix_diff` | Mendix model changes of a branch, read from git or disk worktree (no checkout, no mxcli; MPR v1 and mprcontents/ v2): commits, changed documents with module, folder, name and type, elements with property diffs (compact with `detail: "changes"`, ignore noise with `ignore: ["translations"]`), flow graphs with statuses and clean node summaries. Resolves cross-folder clones in the same repo group, supports `to: "working-tree"`. Data for a client (extension / review tool); needs Node 22.13+ (`lens node`) |
 | `branch_impact` | what a change on one branch (e.g. a bugfix on `release`) means for another: functions still used there, overlap, shared files, text merge conflicts |
 | `commit_show` | what one commit changed (files and functions against its first parent) |
 | `function_history` | the commits that added, modified or removed one function; without `name` every commit that touched the file |
@@ -166,6 +167,8 @@ lens uninstall            # remove lady-lens again
 This adds a stdio entry (absolute `node` path, no daemon, no port) to each agent's MCP config, keeps its other servers, and saves the old file as `<file>.lady-lens.bak`. Restart the agent afterwards. A config with comments (JSONC) is reported and left untouched.
 
 `lens install --skill` installs `skills/lady-lens/SKILL.md` in detected Claude, Copilot, or Agents skill directories, and makes lady-lens the default for code search (a skill only loads when a task matches it). The rules live in one file, `~/.lady-lens/lens-instructions.md` (from `skills/lady-lens/lens-instructions.md`). Files you own get only one marked line: in `CLAUDE.md` an `@` import of that file, elsewhere the core rule itself plus a link to it: `~/.claude/CLAUDE.md` (an `@` import), `~/.copilot/copilot-instructions.md`, `~/.codex/AGENTS.md` and `~/.vibe/AGENTS.md` (Mistral Vibe). VS Code (`User/prompts/lady-lens.instructions.md`) and Antigravity (`~/.gemini/config/rules/lady-lens.md`) get a rules file of their own. `lens uninstall --skill` removes the skill, that one line and those two files; nothing else in your files changes.
+
+`lens install --hooks` sets up non-blocking Git hooks (`post-commit`, `post-checkout`, `post-merge`, `post-rewrite`) in `.git/hooks` that trigger a bundled background sync on the daemon (`POST /sync?repo=...`). Hooks run after events, never block commits, preserve pre-existing hook scripts, and can be disabled with `LENS_HOOKS=0`. `lens uninstall --hooks` cleanly removes the lady-lens block.
 
 Start the background service:
 ```bash

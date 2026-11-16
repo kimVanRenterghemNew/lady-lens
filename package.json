@@ -1,6 +1,6 @@
 {
   "name": "lady-lens",
-  "version": "1.6.11",
+  "version": "1.6.15",
   "description": "Kura's code graph for any JavaScript repository: definitions, imports, function view, decisions. Local, on Ladybug.",
   "license": "GPL-3.0-or-later",
   "author": "Kim Van Renterghem <kim.van.renterghem@gmail.com>",

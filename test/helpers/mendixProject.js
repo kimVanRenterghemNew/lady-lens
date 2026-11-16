@@ -67,6 +67,7 @@ export async function mendixRepo({ format = 'mpr-v1' } = {}) {
             git('add', '-A');
             git('commit', '-q', '-m', message);
         },
+        writeWorkingTree: units => write(units),
         checkout: branch => git('checkout', '-q', branch),
         remove: () => fs.rmSync(root, { recursive: true, force: true })
     };

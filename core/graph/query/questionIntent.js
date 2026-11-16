@@ -59,10 +59,8 @@ function detectImportDirection(before, after) {
     return null;
 }
 
-function extractImportRelation(prompt, match, file) {
-    if (!/import|ge[iï]mporteerd|hangt|depend|gebruikt|uses/i.test(prompt)) return null;
-    const before = prompt.slice(0, match.index);
-    const after = prompt.slice(match.index + match[0].length);
+function extractImportRelation(before, after, file) {
+    if (!/import|ge[iï]mporteerd|hangt|depend|gebruikt|uses/i.test(`${before} ${after}`)) return null;
     const relation = detectImportDirection(before, after);
     return relation ? { relation, file } : null;
 }
@@ -76,9 +74,11 @@ export function recognizeImportQuestion(text) {
     const match = prompt.match(PATH_TOKEN);
     if (!match || !isQuestionPrompt(prompt)) return null;
     const file = match[1].replace(/^\.\//, '');
-    const directRelation = classifyNonImportRelation(prompt, file);
+    const before = prompt.slice(0, match.index);
+    const after = prompt.slice(match.index + match[0].length);
+    const directRelation = classifyNonImportRelation(`${before} ${after}`, file);
     if (directRelation) return directRelation;
-    return extractImportRelation(prompt, match, file);
+    return extractImportRelation(before, after, file);
 }
 
 function filterWords(prompt) {

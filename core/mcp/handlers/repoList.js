@@ -1,3 +1,3 @@
-import { listRegisteredRepos } from '../../repository/index.js';
+import { listRegisteredRepos, groupRegisteredRepos } from '../../repository/index.js';
 
-export const repoList = () => listRegisteredRepos();
+export const repoList = () => groupRegisteredRepos(listRegisteredRepos());

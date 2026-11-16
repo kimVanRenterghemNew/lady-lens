@@ -5,6 +5,7 @@
  */
 import { execFileSync } from 'child_process';
 export { createFakeGit, fakeSha } from './fakeGit.js';
+export { HOOK_NAMES, HOOK_START, HOOK_END, HOOK_SCRIPT, installHooks, uninstallHooks, hookInstallCommand } from './hooks.js';
 
 // windowsHide: in the detached daemon (no console) every git call without it opened a console and took ~1 s, not ~75 ms
 // stderr piped, not ignored: the error then carries git's reason (`error.stderr`), such as "dubious ownership"
@@ -81,6 +82,8 @@ export function createGit({ root, run = defaultRun } = {}) {
     }
     return {
         currentBranch: () => tryGit('rev-parse', '--abbrev-ref', 'HEAD')?.trim() || null,
+        rootCommit: () => tryGit('rev-list', '--max-parents=0', 'HEAD')?.trim().split(/\s+/)[0] || null,
+        originUrl: () => tryGit('config', '--get', 'remote.origin.url')?.trim() || null,
         // null for an unknown ref; a folder git refuses is no unknown ref, so that throws (GIT_UNSAFE_REPOSITORY)
         resolveCommit: ref => {
             try { return git('rev-parse', '--verify', '--quiet', `${ref}^{commit}`).trim() || null; } catch (error) {

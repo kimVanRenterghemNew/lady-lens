@@ -11,7 +11,7 @@ import crypto from 'crypto';
 export const fakeSha = name => crypto.createHash('sha1').update(name).digest('hex');
 
 const NO_REPOSITORY = {
-    currentBranch: () => null, resolveCommit: () => null, mergeBase: () => null, readBlob: () => null, readBlobBytes: () => null, logRange: () => [], commitList: () => [], countRange: () => null,
+    currentBranch: () => null, rootCommit: () => null, originUrl: () => null, resolveCommit: () => null, mergeBase: () => null, readBlob: () => null, readBlobBytes: () => null, logRange: () => [], commitList: () => [], countRange: () => null,
     headInfo: () => null, commitInfo: () => null, fileLog: () => [], commitFiles: () => [], listBranches: () => [], listTree: () => null,
     readBlobs: (ref, paths) => new Map(paths.map(file => [file, null])), existsAt: () => false, prefix: () => null, changedSince: () => null,
     grepRef: () => [], grepRefs: (ref, names) => new Map(names.map(name => [name, []])), lastCommitFor: () => null, conflicts: () => null, worktreeChanges: () => [], ignoredPaths: () => null, commitsWithFiles: () => [],
@@ -82,6 +82,8 @@ export function createFakeGit(state = null) {
 
     const git = {
         currentBranch: () => state.head ?? null,
+        rootCommit: () => (state?.commits?.length ? fakeSha(state.commits[0].name) : null),
+        originUrl: () => null,
         resolveCommit: ref => resolve(ref),
         mergeBase: (a, b) => {
             const [x, y] = [resolve(a), resolve(b)];

@@ -131,9 +131,7 @@
       "computePageRank#1": 11
     },
     "core/graph/query/functionView.js": {
-      "Arrow function#1": 11,
-      "Arrow function#2": 6,
-      "functionView#1": 25
+      "functionView#1": 11
     },
     "core/graph/query/graphContext.js": {
       "buildContextFromGraph#1": 11
@@ -252,17 +250,14 @@
       "tomlInstall#1": 9
     },
     "core/mendix/elementDiff.js": {
-      "Arrow function#1": 13,
-      "elementChanges#1": 10,
-      "labelOf#1": 6
+      "Arrow function#1": 7,
+      "Arrow function#2": 13
     },
     "core/mendix/mendixDiff.js": {
-      "changedUnits#1": 7,
-      "documentEntry#1": 12,
-      "mendixDiff#1": 12
+      "documentEntry#1": 8,
+      "mendixDiff#1": 11
     },
     "core/mendix/modelReader.js": {
-      "Arrow function#1": 7,
       "locationOf#1": 8
     },
     "core/observability/debugLog.js": {

@@ -1,8 +1,7 @@
 /**
  * What changed inside one Mendix document, element by element. An element is an object with a $ID. It is reported on its
- * own when it has a Name, sits directly in the document or in a microflow's object collection (an activity, an event, a
- * flow); a smaller nameless part (a parameter mapping, a caption, a line) folds into its owner as a property path such as
- * `Action > ParameterMappings`. A value that points at another element ($ID) is shown as that element's label.
+ * own when it has a Name or Caption, or sits in a collection; a smaller nameless part folds
+ * into its owner as a property path such as `Action > ParameterMappings`.
  * @module core/mendix/elementDiff
  */
 
@@ -10,18 +9,102 @@ import { nodeSummary } from './flows.js';
 
 const COLLECTIONS = new Set(['Microflows$MicroflowObjectCollection']);
 const isElement = value => value && typeof value === 'object' && !Array.isArray(value) && typeof value.$ID === 'string';
-// Mendix lists start with a version number: [3, item, item]
 const items = list => (typeof list[0] === 'number' && list.length > 0 ? list.slice(1) : list);
 const textOf = value => (typeof value === 'string' ? value : null);
 
-/** type, name (or caption) and, for an activity or decision, what it does (`NanoflowCallAction: Module.Flow`): an
- * activity's caption is often just Mendix's automatic "Activity". */
+const elementName = el => textOf(el.Name) ?? textOf(el.Caption) ?? null;
+const elementDetail = el => (el.Action || el.SplitCondition ? nodeSummary(el) : null);
+
 export function labelOf(element) {
-    const detail = element.Action || element.SplitCondition ? nodeSummary(element) : null;
-    return { type: element.$Type, name: textOf(element.Name) ?? textOf(element.Caption) ?? null, ...(detail ? { detail } : {}) };
+    const detail = elementDetail(element);
+    return { type: element.$Type, name: elementName(element), ...(detail ? { detail } : {}) };
 }
 
-/** Every reported element of `doc`: id -> { type, name, properties: { path: value } }. */
+const isTranslationProp = path => Boolean(path && /(?:^|\s*>\s*)(?:Translations?|Texts?)\b/i.test(path));
+const isLayoutProp = path => Boolean(path && /(?:^|\s*>\s*)(?:Position|Width|Height|Class|Left|Top|Bottom|Right|Bounds|Margin|Padding|Alignment)\b/i.test(path));
+const hasIgnore = (ignore, key, test) => Boolean(ignore?.includes(key) && test);
+
+function matchIgnore(path, ignore) {
+    if (hasIgnore(ignore, 'translations', isTranslationProp(path))) return 'translations';
+    if (hasIgnore(ignore, 'layout', isLayoutProp(path))) return 'layout';
+    return null;
+}
+
+export function isPropIgnored(path, options = {}) {
+    const kind = matchIgnore(path, options.ignore);
+    if (!kind) return false;
+    if (options.ignored) options.ignored[kind] = (options.ignored[kind] || 0) + 1;
+    return true;
+}
+
+const itemKey = item => (item && typeof item === 'object' ? item.Parameter || item.Name || item.Key || item.$ID || null : null);
+
+function checkItemDiff(k, item, bMap) {
+    if (!bMap.has(k)) return { change: 'added', key: k, item };
+    if (JSON.stringify(item) !== JSON.stringify(bMap.get(k))) {
+        return { change: 'modified', key: k, before: bMap.get(k), after: item };
+    }
+    return null;
+}
+
+function diffAddedOrModified(aMap, bMap) {
+    const list = [];
+    for (const [k, item] of aMap) {
+        const diff = checkItemDiff(k, item, bMap);
+        if (diff) list.push(diff);
+    }
+    return list;
+}
+
+function diffDeleted(bMap, aMap) {
+    const list = [];
+    for (const [k, item] of bMap) {
+        if (!aMap.has(k)) list.push({ change: 'deleted', key: k, item });
+    }
+    return list;
+}
+
+export function diffListItems(before, after) {
+    const bMap = new Map();
+    const aMap = new Map();
+    before.forEach((item, i) => bMap.set(itemKey(item) ?? i, item));
+    after.forEach((item, i) => aMap.set(itemKey(item) ?? i, item));
+    return [...diffAddedOrModified(aMap, bMap), ...diffDeleted(bMap, aMap)];
+}
+
+function buildPropDiff(path, before, after, options) {
+    if (options.detail === 'changes' && Array.isArray(before) && Array.isArray(after)) {
+        return { path, items: diffListItems(before, after) };
+    }
+    return { path, before, after };
+}
+
+function propDiffEntry(key, oldProps, newProps, options) {
+    if (isPropIgnored(key, options)) return null;
+    const bVal = oldProps[key] ?? null;
+    const aVal = newProps[key] ?? null;
+    if (JSON.stringify(bVal) === JSON.stringify(aVal)) return null;
+    return buildPropDiff(key, bVal, aVal, options);
+}
+
+function diffProperties(oldProps, newProps, options) {
+    const keys = [...new Set([...Object.keys(oldProps), ...Object.keys(newProps)])];
+    const diffs = [];
+    for (const key of keys) {
+        const diff = propDiffEntry(key, oldProps, newProps, options);
+        if (diff) diffs.push(diff);
+    }
+    return diffs;
+}
+
+function toPropsArray(props, side, options) {
+    return Object.entries(props)
+        .filter(([path]) => !isPropIgnored(path, options))
+        .map(([path, val]) => ({ path, [side]: val }));
+}
+
+const ownsReport = (element, inTopOrCollection) => inTopOrCollection || Boolean(textOf(element.Name)) || Boolean(textOf(element.Caption));
+
 export function elementsOf(doc) {
     const labels = new Map();
     const collect = value => {
@@ -34,7 +117,6 @@ export function elementsOf(doc) {
     const show = value => (typeof value === 'string' && labels.has(value) ? { element: labels.get(value) } : value);
     const reported = new Map();
 
-    // the properties of `value` under `prefix`, into `props`; nested reported elements go to `report`
     const flatten = (value, prefix, props, parentIsTop) => {
         const flattenField = (key, field) => {
             if (key === '$ID' || (key === '$Type' && !prefix)) return;
@@ -61,7 +143,6 @@ export function elementsOf(doc) {
         for (const [key, field] of Object.entries(value)) flattenField(key, field);
     };
     const summary = item => { const props = {}; flatten(item, '', props, false); return isElement(item) ? { type: item.$Type, ...props } : props; };
-    const ownsReport = (element, inTopOrCollection) => inTopOrCollection || Boolean(textOf(element.Name));
     const report = (element, isTop) => {
         const props = {};
         flatten(element, '', props, isTop);
@@ -73,20 +154,42 @@ export function elementsOf(doc) {
 
 const label = ({ type, name, detail }) => ({ type, name, ...(detail ? { detail } : {}) });
 
-/** Added, deleted and modified elements between two versions of one document (`null` for a side that does not exist). */
-export function elementChanges(beforeDoc, afterDoc) {
-    const before = beforeDoc ? elementsOf(beforeDoc) : new Map();
-    const after = afterDoc ? elementsOf(afterDoc) : new Map();
-    const changes = [];
-    for (const [id, element] of before) if (!after.has(id)) changes.push({ change: 'deleted', id, ...label(element), properties: element.properties });
-    for (const [id, element] of after) if (!before.has(id)) changes.push({ change: 'added', id, ...label(element), properties: element.properties });
+function buildElementChange(change, id, element, options) {
+    if (options.detail === 'summary') return { change, id, ...label(element) };
+    const side = change === 'added' ? 'after' : 'before';
+    const properties = toPropsArray(element.properties, side, options);
+    return { change, id, ...label(element), properties };
+}
+
+function collectModified(before, after, options) {
+    const modified = [];
     for (const [id, element] of after) {
         const old = before.get(id);
         if (!old) continue;
-        const keys = [...new Set([...Object.keys(old.properties), ...Object.keys(element.properties)])];
-        const properties = keys.filter(key => JSON.stringify(old.properties[key]) !== JSON.stringify(element.properties[key]))
-            .map(key => ({ path: key, before: old.properties[key] ?? null, after: element.properties[key] ?? null }));
-        if (properties.length) changes.push({ change: 'modified', id, ...label(element), properties });
+        if (options.detail === 'summary') {
+            modified.push({ change: 'modified', id, ...label(element) });
+            continue;
+        }
+        const properties = diffProperties(old.properties, element.properties, options);
+        if (properties.length) modified.push({ change: 'modified', id, ...label(element), properties });
     }
-    return changes;
+    return modified;
+}
+
+function collectSide(source, target, change, options) {
+    const list = [];
+    for (const [id, element] of source) {
+        if (!target.has(id)) list.push(buildElementChange(change, id, element, options));
+    }
+    return list;
+}
+
+export function elementChanges(beforeDoc, afterDoc, options = {}) {
+    const before = beforeDoc ? elementsOf(beforeDoc) : new Map();
+    const after = afterDoc ? elementsOf(afterDoc) : new Map();
+    return [
+        ...collectSide(before, after, 'deleted', options),
+        ...collectSide(after, before, 'added', options),
+        ...collectModified(before, after, options)
+    ];
 }

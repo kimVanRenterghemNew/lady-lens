@@ -181,4 +181,23 @@ describe('MCP HTTP/SSE Server', () => {
             await mcpHttp.close();
         }
     });
+
+    it('accepts POST /sync and queues a background sync', async () => {
+        let queuedRepo = null;
+        const fakeQueue = { trigger: repo => { queuedRepo = repo; } };
+        const mcpHttp = createMcpHttpServer({ defaultRepo: process.cwd(), port: 0, syncQueue: fakeQueue });
+        const { port } = await mcpHttp.start(0);
+        try {
+            const res = await fetch(`http://127.0.0.1:${port}/sync?repo=test-repo`, { method: 'POST' });
+            expect(res.status).toBe(202);
+            const data = await res.json();
+            expect(data).toMatchObject({ status: 'queued', repo: 'test-repo' });
+            expect(queuedRepo).toBe('test-repo');
+
+            const bad = await fetch(`http://127.0.0.1:${port}/sync`, { method: 'GET' });
+            expect(bad.status).toBe(405);
+        } finally {
+            await mcpHttp.close();
+        }
+    });
 });

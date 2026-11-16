@@ -11,6 +11,7 @@ export {
     createMcpHttpServer,
     createMcpDashboardHtml
 } from './httpServer.js';
+export { createSyncQueue } from './syncQueue.js';
 export { handleStreamableHttpRequest } from './streamableHttp.js';
 export { agentTargets, skillTargets, serverEntry, runAgentInstall, runSkillInstall, runRefresh, formatAgentInstall, agentInstallCommand } from './agentInstall.js';
 export {

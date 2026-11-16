@@ -35,10 +35,20 @@ function extractActionTarget(action) {
     return actionVariable(action);
 }
 
+function cleanTarget(target) {
+    if (typeof target !== 'string') return target ?? null;
+    const match = /expression=(.*?)(?:;\s*\$|$)/i.exec(target);
+    if (match) return match[1].trim();
+    if (target.startsWith('@')) {
+        return target.replace(/^@\s*([^;]+;\s*)*expression=/i, '').replace(/;\s*\$Type=.*$/, '').trim();
+    }
+    return target;
+}
+
 function extractNodeTarget(node) {
     const target = extractActionTarget(node.Action);
-    if (target) return target;
-    return node.SplitCondition ? node.SplitCondition.Expression : null;
+    if (target) return cleanTarget(target);
+    return cleanTarget(node.SplitCondition?.Expression);
 }
 
 /** What a node does, in a few words: the called flow, the retrieved entity, the decision's expression. */

@@ -11,3 +11,4 @@ export { codeHealth, coverageFromSummary, configureLensHealthSignals, healthSign
 export { calculateArchitectureMetrics } from './architectureMetrics.js';
 export { fileImpact, barrelReach } from './impact.js';
 export { hubsAndBridges } from './hubsAndBridges.js';
+export { parameterSeams, extractSeamsFromSource } from './parameterSeams.js';
