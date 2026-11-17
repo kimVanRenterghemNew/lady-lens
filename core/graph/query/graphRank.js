@@ -7,6 +7,7 @@
 import { tokenize, sharesStem } from './rankTokens.js';
 import { findTypoCorrections, computeTermWeights } from './rankCorrections.js';
 import { getNodeSearchIndex } from './searchIndex.js';
+import { graphGroundingScore } from './rankGrounding.js';
 import { NL_EN } from '../../language/index.js';
 
 export { tokenize } from './rankTokens.js';
@@ -169,11 +170,7 @@ function filterNodesByKind(graph, kind) {
     return Array.from(graph.nodes.values()).filter(node => nodeMatchesKind(node, kind));
 }
 
-const DEFAULT_RANK_OPTS = Object.freeze({ limit: 10, minScore: MIN_SCORE });
-
-function rankOptions(options) {
-    return Object.assign({}, DEFAULT_RANK_OPTS, options);
-}
+const rankOptions = (options) => ({ limit: 10, minScore: MIN_SCORE, ...options });
 
 /**
  * @param {{nodes: Map<string, object>}} graph
@@ -192,7 +189,7 @@ export function rankGraphNodes(graph, text, options) {
     const wantsDecisions = terms.some(term => DECISION_WORDS.test(term));
     const wantsDiscussions = terms.some(term => /^(discussie|discussies|discussion|discussions|besproken|discussed|afgesproken|afspraak|afspraken|agreed|agreement)$/.test(term));
     return nodes
-        .map(node => ({ node, score: scoreNode(node, terms, wantsTests, wantsDocs, weights) + nodeBonus(node, wantsDecisions, wantsDiscussions) }))
+        .map(node => ({ node, score: scoreNode(node, terms, wantsTests, wantsDocs, weights) + nodeBonus(node, wantsDecisions, wantsDiscussions) + graphGroundingScore(node, text) }))
         .filter(entry => entry.score >= opts.minScore)
         .sort((a, b) => b.score - a.score || String(a.node.path || a.node.id).localeCompare(String(b.node.path || b.node.id)))
         .slice(0, opts.limit);

@@ -9,6 +9,7 @@ import { resolveCallee } from '../model/index.js';
 import { docCommentAt } from './docComment.js';
 import { classShape } from './classShape.js';
 import { parameterSeams } from './parameterSeams.js';
+import { extractTestMetadata } from './testFixtureSeams.js';
 
 const isTestNode = (node) => node.kind === 'test' || node.type === 'Test' || /(^|\/)test\//.test(String(node.path));
 const isBarrel = (path) => /(^|\/)index\.[cm]?js$/.test(path);
@@ -86,7 +87,7 @@ function handleProvenCaller(path, sites, max, callers) {
 }
 
 function recordCallerOrTest(isTest, entry, text, symbol, tests, callers) {
-    if (isTest) tests.push({ ...entry, names: testNames(text, symbol) });
+    if (isTest) tests.push({ ...entry, names: testNames(text, symbol), ...extractTestMetadata(text) });
     else callers.push(entry);
 }
 

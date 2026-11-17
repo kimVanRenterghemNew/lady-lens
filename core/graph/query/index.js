@@ -12,3 +12,5 @@ export { calculateArchitectureMetrics } from './architectureMetrics.js';
 export { fileImpact, barrelReach } from './impact.js';
 export { hubsAndBridges } from './hubsAndBridges.js';
 export { parameterSeams, extractSeamsFromSource } from './parameterSeams.js';
+export { pathGroundingBonus, routingSeamBonus, graphGroundingScore } from './rankGrounding.js';
+export { extractTestMocks, extractTestFixture, extractTestMetadata } from './testFixtureSeams.js';

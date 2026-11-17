@@ -3,58 +3,11 @@
  * Used by functionView to inform test generation (contractPrompt) of needed mocks.
  * @module core/graph/query/parameterSeams
  */
-import { parse } from 'acorn';
-
-function forChildren(node, fn) {
-    for (const key of Object.keys(node).filter(k => k !== 'loc')) {
-        const items = Array.isArray(node[key]) ? node[key] : [node[key]];
-        items.forEach(item => { if (item?.type) fn(item); });
-    }
-}
-
-const stripTypeScriptTypes = (s) => s.replace(/:\s*[A-Za-z0-9_<>[\]|&,\s]+(?=[=,)])/g, '').replace(/:\s*[A-Za-z0-9_<>[\]|&,\s]+(?=\s*\{)/g, '');
-
-const parseModule = (code) => parse(code, { ecmaVersion: 'latest', sourceType: 'module', allowHashBang: true, locations: true });
-
-function safeParse(source) {
-    if (!source || typeof source !== 'string') return null;
-    try {
-        return parseModule(source);
-    } catch {
-        try { return parseModule(stripTypeScriptTypes(source)); } catch { return null; }
-    }
-}
-
-const FN_TYPES = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression']);
-const isFn = (node) => (node ? FN_TYPES.has(node.type) : false);
-
-const UNWRAPPERS = {
-    FunctionDeclaration: (node, symbol) => (node.id?.name === symbol ? node : null),
-    FunctionExpression: (node, symbol) => (node.id?.name === symbol ? node : null),
-    VariableDeclarator: (node, symbol) => (node.id?.name === symbol && isFn(node.init) ? node.init : null),
-    MethodDefinition: (node, symbol) => (node.key?.name === symbol && isFn(node.value) ? node.value : null),
-    Property: (node, symbol) => (node.key?.name === symbol && isFn(node.value) ? node.value : null)
-};
-
-const unwrapFunction = (node, symbol) => UNWRAPPERS[node?.type]?.(node, symbol) ?? null;
-
-function matchesLine(node, line) {
-    if (!line || !node?.loc) return false;
-    return isFn(node) && node.loc.start.line === line;
-}
-
-const checkNode = (node, symbol, startLine) => unwrapFunction(node, symbol) || (matchesLine(node, startLine) ? node : null);
-
-function findFunction(ast, symbol, startLine) {
-    let found = null;
-    const visit = (node) => {
-        if (!node || found) return;
-        found = checkNode(node, symbol, startLine);
-        if (!found) forChildren(node, visit);
-    };
-    visit(ast);
-    return found;
-}
+import {
+    forChildren, safeParse, findFunction,
+    collectLocalFunctions, inspectAliasDirectCall,
+    enrichFromDocParams, collectHelperSeams
+} from './seamHelpers.js';
 
 const addIdentParam = (p, target) => { if (p && p.type === 'Identifier') target.set(p.name, []); };
 const unwrapParam = (p) => (p?.type === 'AssignmentPattern' ? p.left : p);
@@ -142,9 +95,12 @@ function recordChain(target, info, isCall, aliases) {
 function inspectCall(node, target, aliases) {
     if (node.type !== 'CallExpression') return;
     const callee = unwrapChain(node.callee);
-    if (callee?.type !== 'MemberExpression') return;
-    const info = resolveMemberParts(callee);
-    if (info) recordChain(target, info, true, aliases);
+    if (callee?.type === 'MemberExpression') {
+        const info = resolveMemberParts(callee);
+        if (info) recordChain(target, info, true, aliases);
+        return;
+    }
+    inspectAliasDirectCall(callee, target, aliases);
 }
 
 const isParentMember = (node, parent) => Boolean(parent?.type === 'MemberExpression' && parent.object === node);
@@ -179,6 +135,13 @@ export function extractSeamsFromSource(source, symbol, startLine) {
     for (const param of fn.params || []) addParam(param, target);
     const aliases = collectAliases(fn.body, target);
     collectSeamsFromBody(fn.body, target, aliases);
+    const localFns = collectLocalFunctions(ast);
+    localFns.delete(symbol);
+    collectHelperSeams(localFns, target, (body, tgt) => {
+        const hAliases = collectAliases(body, tgt);
+        collectSeamsFromBody(body, tgt, hAliases);
+    });
+    enrichFromDocParams(source, target);
     return dedupeMap(target);
 }
 
