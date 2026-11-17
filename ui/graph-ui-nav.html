@@ -2,7 +2,7 @@
      are at. Every click in any tab is a step; the URL hash holds the place, so the browser's Back/Forward and a copied
      link bring you back to it, and the crumbs show where you were. -->
 <script>
-const TABS = ['search', 'trace', 'health', 'graph'];
+const TABS = ['search', 'trace', 'health', 'graph', 'repos'];
 let here = { tab: 'search', path: null, line: null };
 let trail = [];   // places with code you visited, newest last, each once
 let traceMarks = new Set();   // `path#symbol` of the frames of the last pasted stack trace (marked in the flow diagram)
@@ -25,9 +25,20 @@ function startAt(place) {
   show(place);
 }
 
+/** A code link opens where it says; without a tab it stays in the graph workspace, else in the explorer. */
+const linkTab = el => el.dataset.tab || (here.tab === 'graph' ? 'graph' : 'search');
+
+/** The graph tab is the workspace: the search sidebar, the graph and the code side by side; other tabs get them back. */
+function dockPanes(tab) {
+  const graph = tab === 'graph';
+  (graph ? $('#graph-side') : $('#view-search')).append($('#search-side'));
+  (graph ? $('#graph-code') : $('#view-search')).append($('#code-view'));
+}
+
 function show(place) {
   const moved = place.path && (place.path !== here.path || place.line !== here.line || !$('#code-ctx'));
   here = place;
+  dockPanes(place.tab);
   for (const el of document.querySelectorAll('.tab-btn, .tab-pane')) el.classList.toggle('active', el.dataset.tab === place.tab || el.id === `view-${place.tab}`);
   $(`#view-${place.tab}`).load?.();
   if (moved) {

@@ -81,20 +81,31 @@ export function currentGitBranch(dir) {
     }
 }
 
+function databaseOfDb(db, registry) {
+    const fromReg = registry.repos[db];
+    return fromReg?.database || (db.endsWith('.lbdb') ? path.resolve(db) : databasePathOfRepo(db));
+}
+
+function databaseFor(extra, registry, current, id) {
+    if (extra.database) return extra.database;
+    return extra.db ? databaseOfDb(extra.db, registry) : current.database || databasePathOfRepo(id);
+}
+
+/** A folder merged into a repository as a location has no entry of its own: it shares that repository's database. */
+export function hostOfFolder(registry, folder) {
+    const host = Object.values(registry.repos).find(r => (r.locations ?? []).some(l => samePath(l, folder)));
+    return host ? { database: host.database, mergedInto: host.id } : null;
+}
+
+const entryOf = (registry, id, folder) => registry.repos[id] || hostOfFolder(registry, folder) || {};
+
 export function registerRepo(repoPath, extra = {}, registryFile = REGISTRY_FILE) {
     const resolved = canonicalRepoPath(repoPath);
     const id = idOfRepo(resolved);
     const registry = readRegistry(registryFile);
-    let database = extra.database;
-    if (!database && extra.db) {
-        const fromReg = registry.repos[extra.db];
-        database = fromReg?.database || (extra.db.endsWith('.lbdb') ? path.resolve(extra.db) : databasePathOfRepo(extra.db));
-    }
-    if (!database) {
-        database = databasePathOfRepo(id);
-    }
+    const current = entryOf(registry, id, resolved);
+    const database = databaseFor(extra, registry, current, id);
     const branch = extra.branch || currentGitBranch(resolved) || undefined;
-    const current = registry.repos[id] || {};
     const updated = {
         ...current,
         id,

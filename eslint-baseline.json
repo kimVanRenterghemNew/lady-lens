@@ -222,12 +222,14 @@
     },
     "core/mcp/agentInstall.js": {
       "agentInstallCommand#1": 11,
-      "Arrow function#1": 6,
       "formatAgentInstall#1": 8,
       "runAgentInstall#1": 9,
       "runSkillInstall#1": 13,
       "serverEntry#1": 6,
       "update#1": 6
+    },
+    "core/mcp/agentTargets.js": {
+      "agentTargets#1": 6
     },
     "core/mcp/handlers/config.js": {
       "Arrow function#1": 13,
@@ -278,7 +280,7 @@
     },
     "core/repository/registry.js": {
       "readRegistry#1": 6,
-      "registerRepo#1": 14,
+      "registerRepo#1": 7,
       "resolveRepoTarget#1": 7
     },
     "core/search/budget.js": {
@@ -348,7 +350,7 @@
     },
     "ui/graph-ui-context.html": {
       "showContext#1": 24,
-      "showHealth#1": 11,
+      "showHealth#1": 8,
       "showHistory#1": 8,
       "showTree#1": 6
     },
@@ -356,7 +358,7 @@
       "Arrow function#1": 7,
       "Arrow function#2": 6,
       "drawFlow#1": 11,
-      "drawOverview#1": 11,
+      "drawOverview#1": 13,
       "showFlow#1": 7
     },
     "ui/graph-ui-health.html": {
@@ -371,7 +373,7 @@
       "Async arrow function#1": 6
     },
     "ui/graph-ui.html": {
-      "Async arrow function#1": 8,
+      "Async arrow function#1": 7,
       "doSearch#1": 24,
       "renderResults#1": 15,
       "showCode#1": 9

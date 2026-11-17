@@ -3,6 +3,9 @@
  * refuses an unknown tool, and its overview keeps only files and their import/test edges.
  */
 import { describe, it, expect, afterEach } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { createGraphUiServer, overviewOf } from '../ui/index.js';
 import { createFakeGit } from '../core/git/index.js';
 import { SCENARIO } from './helpers/gitScenario.js';
@@ -38,7 +41,7 @@ describe('lens ui', () => {
         expect(html).toContain('async function showContext(path, line)');
         expect(html).not.toContain('<!-- graph-ui-');
         // one place for all tabs: every code link (health, trace, graph) is a step with go(), kept in the URL hash
-        expect(html).toContain("if (ln) go({ tab: ln.dataset.tab || 'search', path: ln.dataset.path, line: Number(ln.dataset.line) || 1 });");
+        expect(html).toContain("if (ln) go({ tab: linkTab(ln), path: ln.dataset.path, line: Number(ln.dataset.line) || 1 });");
         expect(html).toContain("window.addEventListener('popstate', () => show(placeFromHash()));");
         for (const part of ['lens-health', 'lens-graph', 'lens-trace']) expect(html).toContain(`define('${part}'`);
         expect(html).toContain('if (tool === \'auto\' && t === \'functionView\' && !res.definitions?.length)');
@@ -60,7 +63,7 @@ describe('lens ui', () => {
         expect(await fetch(base + '/api/repo?repo=C:%5Cother').then(r => r.json())).toEqual({ repo: 'C:\\other' });
         expect(await fetch(base + '/api/repo').then(r => r.json())).toEqual({ repo: 'C:\\default' });
         expect((await fetch(base + '/api/overview?repo=nope')).status).toBe(403);
-        expect(await fetch(base + '/api/repos').then(r => r.json())).toEqual([{ id: 'abc', path: 'C:\\other' }]);
+        expect(await fetch(base + '/api/repos').then(r => r.json())).toEqual([{ id: 'abc', path: 'C:\\other', name: null }]);
     });
 
     it('MUST refuse an unknown tool and bad JSON with 400', async () => {
@@ -136,5 +139,62 @@ describe('lens ui', () => {
         const history = await fetch(base + '/api/history?path=a.js&symbol=f').then(r => r.json());
         expect(history.commits.map(c => c.subject)).toEqual(['main touches a', 'change f', 'first']);
         expect((await fetch(base + '/api/history')).status).toBe(400);
+    });
+
+    it('repos tab: lists the registry, renames, merges copies of one repository, syncs and removes; a change needs the page header', async () => {
+        let db = [{ id: 'a', path: 'C:\\x\\a', nodes: 5, rootCommit: 'r1' }, { id: 'b', path: 'C:\\x\\b', nodes: 9, rootCommit: 'r1' }, { id: 'c', path: 'C:\\x\\c', rootCommit: 'r2' }];
+        const repos = {
+            list: () => db,
+            find: id => db.find(r => r.id === id),
+            register: (p, extra) => { db = db.map(r => r.path === p ? { ...r, ...extra } : r); },
+            unregister: id => { const gone = db.find(r => r.id === id); db = db.filter(r => r.id !== id); return gone; },
+            sync: async ({ full }) => ({ synced: full })
+        };
+        const base = await start({ tools: {}, loadOverview: async () => graph, repos, runInRepo: (hint, fn) => fn({ path: hint }) });
+        const change = (body, headers = { 'x-lens-ui': '1' }) => fetch(base + '/api/repos/change', { method: 'POST', headers, body: JSON.stringify(body) }).then(r => r.json());
+        const all = () => fetch(base + '/api/repos/all').then(r => r.json());
+        expect((await all()).map(r => [r.id, r.copies, r.exists])).toEqual([['a', 2, false], ['b', 2, false], ['c', 1, false]]);
+        expect((await fetch(base + '/api/repos/change', { method: 'POST', body: '{}' })).status).toBe(403);
+        await change({ action: 'rename', id: 'a', name: ' Alpha ' });
+        expect((await all())[0].name).toBe('Alpha');
+        expect((await change({ action: 'rename', id: 'a', name: ' ' })).error).toMatch(/name/);
+        expect((await change({ action: 'merge', id: 'c', into: 'a' })).error).toMatch(/same repository/);
+        expect((await change({ action: 'merge', id: 'a', into: 'a' })).error).toMatch(/two different/);
+        expect(await change({ action: 'merge', id: 'a', into: 'b' })).toEqual({ merged: 'a', into: 'b' });
+        expect((await all())[0].locations).toEqual(['C:\\x\\a']);
+        expect(db.find(r => r.id === 'a')).toMatchObject({ mergedInto: 'b', database: undefined });
+        expect((await all()).map(r => r.id)).toEqual(['b', 'c']);
+        expect(await change({ action: 'sync', id: 'b', full: true })).toEqual({ synced: true });
+        expect(await change({ action: 'remove', id: 'c' })).toEqual({ removed: true });
+        expect((await all()).map(r => r.id)).toEqual(['b']);
+        expect((await change({ action: 'sync', id: 'zz' })).error).toMatch(/unknown repository/);
+        expect((await change({ action: 'dance', id: 'b' })).error).toMatch(/unknown action/);
+        expect((await fetch(base + '/api/repos/change', { method: 'POST', headers: { 'x-lens-ui': '1' }, body: 'x' })).status).toBe(400);
+    });
+
+    it('repos tab: shows the top-level folders and saves exclude_dirs into the repo config, leaving YAML alone', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-cfg-'));
+        fs.mkdirSync(path.join(dir, 'src')); fs.mkdirSync(path.join(dir, 'docs'));
+        fs.writeFileSync(path.join(dir, 'src', 'a.js'), 'export const a = 1;\n');
+        const repo = { id: 'a', path: dir };
+        const base = await start({ tools: {}, loadOverview: async () => graph, repos: { list: () => [repo], find: id => id === 'a' ? repo : null, sync: async () => ({}) }, runInRepo: (hint, fn) => fn({ path: hint }) });
+        const change = body => fetch(base + '/api/repos/change', { method: 'POST', headers: { 'x-lens-ui': '1' }, body: JSON.stringify(body) }).then(r => r.json());
+        const config = () => fetch(base + '/api/repos/config?id=a').then(r => r.json());
+        expect((await config()).folders.find(f => f.name === 'src')).toEqual({ name: 'src', files: 1, excluded: false });
+        expect(await change({ action: 'config', id: 'a', exclude_dirs: ['docs'] })).toEqual({ saved: '.lady-lens.json' });
+        const after = await config();
+        expect([after.exists, after.folders.find(f => f.name === 'docs').excluded]).toEqual([true, true]);
+        expect((await change({ action: 'config', id: 'a', exclude_dirs: ['../x'] })).error).toMatch(/lists of/);
+        expect((await fetch(base + '/api/repos/config?id=zz')).status).toBe(404);
+        fs.rmSync(path.join(dir, '.lady-lens.json'));
+        fs.writeFileSync(path.join(dir, '.lady-lens.yaml'), 'project: {}\n');
+        expect((await change({ action: 'config', id: 'a', exclude_dirs: ['docs'] })).error).toMatch(/YAML/);
+        fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    it('repos tab: without the daemon a sync of another repository is refused with 409', async () => {
+        const base = await start({ tools: {}, loadOverview: async () => graph, repos: { list: () => [], find: () => ({ id: 'a', path: 'p' }) } });
+        const res = await fetch(base + '/api/repos/change', { method: 'POST', headers: { 'x-lens-ui': '1' }, body: JSON.stringify({ action: 'sync', id: 'a' }) });
+        expect(res.status).toBe(409);
     });
 });

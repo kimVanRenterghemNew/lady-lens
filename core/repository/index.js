@@ -14,6 +14,7 @@ export {
     registerRepo,
     unregisterRepo,
     findRegisteredRepo,
+    hostOfFolder,
     resolveRepoTarget,
     currentGitBranch
 } from './registry.js';

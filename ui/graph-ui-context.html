@@ -7,16 +7,29 @@ const ctxList = (title, items) => `<div class="ctx-block"><h4>${title} <span cla
 const issueBadges = issues => (issues || []).map(i => `<span class="badge ${/complex|cycle|pain|boundary/.test(i) ? 'danger' : 'warn'}">${esc(i)}</span>`).join(' ');
 let ctxSeq = 0, treeDepth = 2;
 
+const healthStrip = (health, inside) => `<div class="ctx-health health-strip">${health.issues?.length || inside.length ? '' : '<span class="badge online">Geen gezondheidsproblemen hier</span>'}<button type="button" class="link-btn" data-goto="health">Alle gezondheid ›</button></div>`;
+
 function showHealth(health, line) {
   const box = $('#code-health');
   if (!box || !health) return;
   const inside = (health.functions || []).filter(f => f.loc && f.loc[0] <= line && line <= f.loc[1]);
-  box.innerHTML = (health.issues?.length ? `<div class="ctx-health">Bestand: ${issueBadges(health.issues)}</div>` : '') +
+  box.innerHTML = healthStrip(health, inside) +
+    (health.issues?.length ? `<div class="ctx-health">Bestand: ${issueBadges(health.issues)}</div>` : '') +
     inside.map(f => `<div class="ctx-health">Functie <strong>${esc(f.name)}</strong>: CC ${f.cyclomaticComplexity}, ${f.lines} regels ${issueBadges(f.issues)}</div>`).join('');
-  for (const f of health.functions || []) {
-    const ln = document.querySelector(`#code-view .ln[data-ln="${f.loc?.[0]}"]`);
-    if (ln) { ln.classList.add('warn'); ln.title = `${f.name}: CC ${f.cyclomaticComplexity}, ${f.lines} regels — ${(f.issues || []).join(', ')}`; }
-  }
+  for (const f of health.functions || []) paintPain(f);
+}
+
+const painLevel = f => f.cyclomaticComplexity > 15 ? 'pain-high' : 'pain';
+const paintLine = (n, cls) => document.querySelector(`#code-view .ln[data-ln="${n}"]`)?.parentElement.classList.add(cls);
+
+/** A function with health issues is tinted over its whole body, red when it is very complex. */
+function paintPain(f) {
+  const [from, to] = f.loc ?? [0, -1];
+  for (let n = from; n <= to; n++) paintLine(n, painLevel(f));
+  const ln = document.querySelector(`#code-view .ln[data-ln="${from}"]`);
+  if (!ln) return;
+  ln.classList.add('warn');
+  ln.title = `${f.name}: CC ${f.cyclomaticComplexity}, ${f.lines} regels — ${(f.issues || []).join(', ')}`;
 }
 
 /** One side of the call tree as nested lists that open per level: `up` follows callers, `down` callees. */

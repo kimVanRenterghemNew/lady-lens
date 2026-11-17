@@ -5,10 +5,14 @@
  * @module core/mcp/agentInstall
  */
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { policyTargets, installPolicy, uninstallPolicy } from './policyInstall.js';
 import { tomlInstall, tomlUninstall } from './tomlInstall.js';
+import { yamlInstall, yamlUninstall, yamlRepo } from './yamlInstall.js';
+import { expandFamilies } from './agentFamilies.js';
+import { agentTargets, skillTargets } from './agentTargets.js';
+
+export { agentTargets, skillTargets };
 
 export const SERVER_NAME = 'lady-lens';
 
@@ -16,25 +20,10 @@ function packageVersion(lensPath) {
     try { return JSON.parse(fs.readFileSync(path.join(path.dirname(lensPath), '..', 'package.json'), 'utf8')).version; } catch { return null; }
 }
 
-/** The agents we know: `marker` says it is installed, `file`/`key` say where its MCP servers live. */
-export function agentTargets({ home = os.homedir(), platform = process.platform, appData = process.env.APPDATA } = {}) {
-    const appSupport = (app, ...rest) => platform === 'win32'
-        ? path.join(appData || path.join(home, 'AppData', 'Roaming'), app, ...rest)
-        : platform === 'darwin' ? path.join(home, 'Library', 'Application Support', app, ...rest) : path.join(home, '.config', app, ...rest);
-    const target = (id, label, marker, file, extra = {}) => ({ id, label, marker, file, key: 'mcpServers', typed: false, ...extra });
-    return [
-        target('claude-code', 'Claude Code', path.join(home, '.claude.json'), path.join(home, '.claude.json')),
-        target('claude-desktop', 'Claude Desktop', appSupport('Claude'), appSupport('Claude', 'claude_desktop_config.json')),
-        target('cursor', 'Cursor', path.join(home, '.cursor'), path.join(home, '.cursor', 'mcp.json')),
-        target('windsurf', 'Windsurf', path.join(home, '.codeium', 'windsurf'), path.join(home, '.codeium', 'windsurf', 'mcp_config.json')),
-        target('gemini-cli', 'Gemini CLI', path.join(home, '.gemini', 'settings.json'), path.join(home, '.gemini', 'settings.json')),
-        target('antigravity', 'Antigravity', path.join(home, '.gemini', 'antigravity'), path.join(home, '.gemini', 'antigravity', 'mcp_config.json')),
-        // the Antigravity CLI reads ~/.gemini/config/mcp_config.json, stdio or Streamable HTTP only (an /sse url fails there)
-        target('antigravity-cli', 'Antigravity CLI', path.join(home, '.gemini', 'antigravity-cli'), path.join(home, '.gemini', 'config', 'mcp_config.json')),
-        target('vscode', 'VS Code', appSupport('Code', 'User'), appSupport('Code', 'User', 'mcp.json'), { key: 'servers', typed: true }),
-        target('codex', 'Codex', path.join(home, '.codex'), path.join(home, '.codex', 'config.toml'), { toml: 'codex' }),
-        target('vibe', 'Mistral Vibe', path.join(home, '.vibe'), path.join(home, '.vibe', 'config.toml'), { toml: 'vibe' })
-    ];
+/** OpenCode and Kilo: the same server, with the command as one array and `environment` for the variables. */
+function localEntry(options) {
+    const { command, args, env } = serverEntry(options);
+    return { type: 'local', command: [command, ...args], enabled: true, ...(env ? { environment: env } : {}) };
 }
 
 export function serverEntry({ lensPath, repo = null, typed = false }) {
@@ -46,6 +35,8 @@ export function serverEntry({ lensPath, repo = null, typed = false }) {
         ...(version ? { env: { LENS_MCP_VERSION: version } } : {})
     };
 }
+
+const entryFor = (target, options) => (target.local ? localEntry(options) : { ...serverEntry({ ...options, typed: target.typed }), ...target.entry });
 
 function readConfig(file) {
     if (!fs.existsSync(file)) return {};
@@ -61,14 +52,6 @@ function writeConfig(file, data) {
 }
 
 export const MENDIX_SKILL = 'lady-lens-mendix';
-
-export function skillTargets({ home = os.homedir() } = {}, name = SERVER_NAME) {
-    return [
-        { id: 'claude', label: 'Claude skill', marker: path.join(home, '.claude'), file: path.join(home, '.claude', 'skills', name, 'SKILL.md') },
-        { id: 'copilot', label: 'Copilot skill', marker: path.join(home, '.copilot'), file: path.join(home, '.copilot', 'skills', name, 'SKILL.md') },
-        { id: 'agents', label: 'Agents skill', marker: path.join(home, '.agents'), file: path.join(home, '.agents', 'skills', name, 'SKILL.md') }
-    ];
-}
 
 function skillSource(lensPath, name = SERVER_NAME) {
     return path.join(path.dirname(lensPath), '..', 'skills', name, 'SKILL.md');
@@ -114,24 +97,26 @@ const uninstall = (target, dryRun) => update(target, dryRun, servers => {
     return 'removed';
 });
 
+const FORMATS = { yaml: [yamlInstall, yamlUninstall], toml: [tomlInstall, tomlUninstall], json: [install, uninstall] };
+
+function applyAgent(target, { action, lensPath, repo, dryRun }) {
+    const [add, remove] = FORMATS[['yaml', 'toml'].find(format => target[format]) ?? 'json'];
+    return action === 'uninstall' ? remove(target, dryRun) : add(target, entryFor(target, { lensPath, repo }), dryRun);
+}
+
 /** Named agents are always handled; without names, only the agents that are installed on this machine. */
 export function runAgentInstall({ action = 'install', ids = [], lensPath, repo = null, dryRun = false, env = {} }) {
     const all = agentTargets(env);
     const explicit = ids.length > 0 && !ids.includes('all');
     const unknown = explicit ? ids.filter(id => !all.some(target => target.id === id)) : [];
     const wanted = explicit ? all.filter(target => ids.includes(target.id)) : all.filter(target => fs.existsSync(target.marker));
-    const results = wanted.map(target => ({
-        id: target.id, label: target.label, file: target.file,
-        ...(target.toml
-            ? (action === 'uninstall' ? tomlUninstall(target, dryRun) : tomlInstall(target, serverEntry({ lensPath, repo }), dryRun))
-            : (action === 'uninstall' ? uninstall(target, dryRun) : install(target, serverEntry({ lensPath, repo, typed: target.typed }), dryRun)))
-    }));
+    const results = wanted.map(target => ({ id: target.id, label: target.label, file: target.file, ...applyAgent(target, { action, lensPath, repo, dryRun }) }));
     return [...unknown.map(id => ({ id, label: id, file: '', status: 'error', reason: `unknown agent; try: ${all.map(target => target.id).join(', ')}` })), ...results];
 }
 
 // `lens install skill vscode claude-code` names agents: the skill folder and the policy file each agent reads
-const SKILL_OF_AGENT = { 'claude-code': 'claude', 'claude-desktop': 'claude', vscode: 'copilot' };
-const POLICY_OF_AGENT = { 'claude-code': 'claude', 'claude-desktop': 'claude' };
+const SKILL_OF_AGENT = { 'claude-code': 'claude', 'claude-desktop': 'claude', vscode: 'copilot', 'copilot-cli': 'copilot', 'gemini-cli': 'gemini' };
+const POLICY_OF_AGENT = { 'claude-code': 'claude', 'claude-desktop': 'claude', 'copilot-cli': 'copilot', 'antigravity-cli': 'antigravity' };
 
 export function runSkillInstall({ action = 'install', ids: named = [], lensPath, dryRun = false, env = {}, name = SERVER_NAME, policyIds = null }) {
     const all = skillTargets(env, name);
@@ -156,12 +141,22 @@ const mentionsLens = file => { try { return fs.readFileSync(file, 'utf8').includ
  * After `lens update`: register lady-lens again only where it is registered (new version; a `--repo` in a JSON entry is kept),
  * and copy again only the skills that are installed, so every agent picks up the new package and nothing new is added.
  */
+const argsOf = found => (found ? found.args || found.command || [] : []);
+
+function configEntry(target) {
+    try { return readConfig(target.file)[target.key]?.[SERVER_NAME]; } catch { return undefined; /* toml */ }
+}
+
+/** The `--repo` a registered entry was started with (JSON: `args`, OpenCode/Kilo: inside `command`), or null. */
+function repoOf(target) {
+    if (target.yaml) return yamlRepo(target);
+    const args = argsOf(configEntry(target));
+    const at = args.indexOf('--repo');
+    return at < 0 ? null : args[at + 1];
+}
+
 export function runRefresh({ lensPath, env = {}, dryRun = false }) {
-    const agents = agentTargets(env).filter(target => mentionsLens(target.file)).flatMap(target => {
-        let repo = null;
-        try { const args = readConfig(target.file)[target.key]?.[SERVER_NAME]?.args || []; repo = args.includes('--repo') ? args[args.indexOf('--repo') + 1] : null; } catch { /* toml */ }
-        return runAgentInstall({ ids: [target.id], lensPath, repo, env, dryRun });
-    });
+    const agents = agentTargets(env).filter(target => mentionsLens(target.file)).flatMap(target => runAgentInstall({ ids: [target.id], lensPath, repo: repoOf(target), env, dryRun }));
     const skills = [SERVER_NAME, MENDIX_SKILL].flatMap(name => {
         const ids = skillTargets(env, name).filter(target => fs.existsSync(target.file)).map(target => target.id);
         // a refresh updates the policies that are there; it never adds one
@@ -184,7 +179,7 @@ export function agentInstallCommand({ action, ids, lensPath, repo, dryRun, skill
     // `lens install skill` / `skill-mendix` read like the flags `--skill` / `--mendix`
     mendix ||= ids.some(id => id === 'mendix' || id === 'skill-mendix');
     skill ||= ids.includes('skill');
-    ids = ids.filter(id => !['skill', 'mendix', 'skill-mendix'].includes(id));
+    ids = expandFamilies(ids.filter(id => !['skill', 'mendix', 'skill-mendix'].includes(id)), { skill, mendix, targets: agentTargets(env) });
     if (refresh && action === 'install') return formatAgentInstall(runRefresh({ lensPath, env, dryRun }), { action, dryRun });
     const results = mendix ? runSkillInstall({ action, ids, lensPath, dryRun, env, name: MENDIX_SKILL })
         : skill ? runSkillInstall({ action, ids, lensPath, dryRun, env }) : runAgentInstall({ action, ids, lensPath, repo, dryRun, env });

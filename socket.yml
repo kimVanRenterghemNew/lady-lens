@@ -1,0 +1,32 @@
+version: 2
+
+# Exclude non-production directories and test fixtures from supply chain scans
+projectIgnorePaths:
+  - "test/**"
+  - "evals/**"
+  - "outputs/**"
+  - "dist/**"
+  - "scripts/**"
+
+# Only trigger scans when package manifests or configuration change
+triggerPaths:
+  - "package.json"
+  - "package-lock.json"
+
+# Security alert policies
+issueRules:
+  # Expected for an MCP server that exposes HTTP / SSE endpoints
+  networkAccess: warn
+  # Expected for git operations (diff, log, status) and native addon compilation (cmake-js)
+  shellAccess: warn
+  # Expected for AST parsers (acorn) and data engines (apache-arrow)
+  eval: warn
+  # Expected for @ladybugdb/core native database bindings
+  installScripts: warn
+  # Prevent noisy alerts on verified upstream packages like json-with-bigint (Apache Arrow)
+  typosquat: warn
+
+# GitHub App integration settings
+githubApp:
+  enabled: true
+  dependencyOverviewEnabled: true

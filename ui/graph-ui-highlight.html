@@ -1,0 +1,16 @@
+<script>
+// Colours the code of one line (the lines are shown one by one, so a block comment is recognised by its first character).
+const KEYWORDS = 'import|export|from|default|const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|async|await|try|catch|finally|throw|typeof|instanceof|in|of|null|undefined|true|false|this|static|get|set|yield|public|private|interface|type|void';
+const TOKEN = new RegExp('(\\/\\/.*$)|("(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'|`(?:[^`\\\\]|\\\\.)*`)|\\b(' + KEYWORDS + ')\\b|\\b(\\d[\\d_.]*)\\b|\\b([A-Za-z_$][\\w$]*)(?=\\()', 'g');
+const TOKEN_CLASS = [null, 'tk-comment', 'tk-string', 'tk-keyword', 'tk-number', 'tk-function'];
+const span = (cls, text) => `<span class="${cls}">${esc(text)}</span>`;
+function hl(line) {
+  if (/^\s*(\/\*|\*)/.test(line)) return span('tk-comment', line);
+  let out = '', last = 0;
+  for (const m of line.matchAll(TOKEN)) {
+    out += esc(line.slice(last, m.index)) + span(TOKEN_CLASS[m.findIndex((g, i) => i && g !== undefined)], m[0]);
+    last = m.index + m[0].length;
+  }
+  return out + esc(line.slice(last));
+}
+</script>

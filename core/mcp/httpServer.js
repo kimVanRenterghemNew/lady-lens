@@ -11,6 +11,7 @@ import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { createLadyLensMcpServer, buildMcpToolSchemas, MCP_SERVER_INFO } from './server.js';
 import { handleStreamableHttpRequest } from './streamableHttp.js';
 import { createSyncQueue } from './syncQueue.js';
+import { sendFavicon, sendFaviconSvg } from '../branding/index.js';
 import { resolveRepoTarget, idOfRepo } from '../repository/index.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -55,6 +56,10 @@ function renderStatusHtml(res, ctx) {
 }
 
 const MCP_ROUTES = {
+    '/favicon.svg': (_req, res) => sendFaviconSvg(res),
+    '/favicon.png': (_req, res) => sendFavicon(res),
+    '/favicon.ico': (_req, res) => sendFavicon(res),
+
     '/ui'(_req, res, _url, ctx) {
         res.writeHead(302, { Location: `http://127.0.0.1:${ctx.uiPort}/` }).end();
     },

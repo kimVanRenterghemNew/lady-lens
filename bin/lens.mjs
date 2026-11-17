@@ -5,7 +5,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { chosenNode } from '../core/update/index.js';
-import { canonicalRepoPath, idOfRepo, LENS_HOME } from '../core/repository/index.js';
+import { canonicalRepoPath, hostOfFolder, idOfRepo, LENS_HOME } from '../core/repository/index.js';
 import { configureLensRoot } from '../core/configuration/index.js';
 import { traceProcess, traceAsync } from '../core/observability/index.js';
 import { askDaemon } from '../core/daemonCall/index.js';
@@ -32,7 +32,7 @@ if (fileConfig.env) Object.entries(fileConfig.env).forEach(([k, v]) => { if (!pr
 
 const readRegistry = () => { try { return JSON.parse(fs.readFileSync(REGISTRY, 'utf8')); } catch { return { repos: {} }; } };
 const registryData = readRegistry();
-const existingEntry = registryData.repos[id];
+const existingEntry = registryData.repos[id] ?? hostOfFolder(registryData, repo);
 
 const explicitDb = dbFlag && (registryData.repos[dbFlag]?.database || (dbFlag.endsWith('.lbdb') ? path.resolve(dbFlag) : path.join(HOME, 'repos', dbFlag, 'graph.lbdb')));
 const configDb = fileConfig.database || fileConfig.db;
@@ -42,6 +42,7 @@ configureLensRoot(repo); // core is imported above, before LENS_REPO_ROOT is set
 process.env.LENS_GRAPH_DB = targetDb;
 process.env.LENS_PROJECT_GRAPH = '1';
 const [command, ...rest] = args;
+const showBanner = async (stream = process.stdout) => (await import('../core/branding/index.js')).showBanner(stream);
 if (['-v', '--version', 'v', 'version'].includes(command) || has('-v') || has('--version')) {
     const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
     console.log(`lady-lens v${pkg.version}`);
@@ -52,7 +53,7 @@ if (['-', '?', '-h', '--help', 'help'].includes(command) || has('-h') || has('--
     process.exit(0);
 }
 if (command === 'list') {
-    for (const entry of Object.values(readRegistry().repos)) console.log(`${entry.id}  ${entry.path}  ${entry.nodes ?? '?'} nodes  last sync ${entry.lastSync ?? 'never'}`);
+    for (const e of Object.values(readRegistry().repos).filter(r => !r.mergedInto)) [e.path, ...(e.locations ?? [])].forEach((folder, i) => console.log(`${e.id}  ${folder}${i ? '' : `  ${e.nodes ?? '?'} nodes  last sync ${e.lastSync ?? 'never'}`}`));
     process.exit(0);
 }
 if (command === 'install' || command === 'uninstall') {
@@ -61,11 +62,11 @@ if (command === 'install' || command === 'uninstall') {
         const out = hookInstallCommand({ action: command, repo: repoExplicit ? repo : process.cwd(), dryRun: has('--dry-run') });
         console.log(out.text); process.exit(out.ok ? 0 : 1);
     }
-    const { agentInstallCommand } = await import('../core/mcp/index.js');
+    const { agentInstallCommand } = await import('../core/mcp/index.js'); if (!has('--refresh')) await showBanner();
     const out = agentInstallCommand({ action: command, ids: rest.filter(a => !a.startsWith('-')), lensPath: fileURLToPath(import.meta.url), repo: repoExplicit ? repo : null, dryRun: has('--dry-run'), skill: has('--skill'), mendix: has('--mendix'), refresh: has('--refresh') });
     console.log(out.text); process.exit(out.ok ? 0 : 1);
 }
-if (command === 'update' || command === 'node') { const update = await import('../core/update/index.js'); const daemonFile = path.join(HOME, 'daemon.json'); const out = command === 'node' ? update.lensNodeCommand(rest[0], { home: os.homedir(), daemonFile }) : update.runLensUpdate({ arg: rest.find(a => !a.startsWith('-')), lensPath: fileURLToPath(import.meta.url), daemonFile }); console.log(out.text); process.exit(out.ok ? 0 : 1); }
+if (command === 'update' || command === 'node') { await showBanner(); process.env.LENS_NO_BANNER = '1'; const update = await import('../core/update/index.js'); const daemonFile = path.join(HOME, 'daemon.json'); const out = command === 'node' ? update.lensNodeCommand(rest[0], { home: os.homedir(), daemonFile }) : update.runLensUpdate({ arg: rest.find(a => !a.startsWith('-')), lensPath: fileURLToPath(import.meta.url), daemonFile }); console.log(out.text); process.exit(out.ok ? 0 : 1); }
 // the MDL export of a Mendix project, started by a sync in the background (core/graph/sync/mendixExport.js)
 if (command === 'mendix-export') { await (await import('../core/graph/index.js')).runMdlExport(rest[0]); process.exit(0); }
 // in a temporary database: the registry and the repository's own database stay as they are
@@ -94,13 +95,13 @@ if (command === 'remove') {
 }
 
 // stdio: no process.exit here, the server keeps reading stdin after runMcpServer returns
-if (command === 'mcp' && args.includes('--stdio')) { const { runMcpServer } = await import('../core/mcp/index.js'); console.error(`lady-lens MCP server started on stdio (${repo})`); await runMcpServer({ defaultRepo: repo }); }
+if (command === 'mcp' && args.includes('--stdio')) { const { runMcpServer } = await import('../core/mcp/index.js'); await showBanner(process.stderr); console.error(`lady-lens MCP server started on stdio (${repo})`); await runMcpServer({ defaultRepo: repo }); }
 
 if (command === 'mcp' && !args.includes('--stdio')) {
     const isDetached = has('-d') || has('--daemon') || has('--detached');
     const port = Number(flag('--port', fileConfig.mcp?.port || fileConfig.port || '4318')) || 4318;
     const uiPort = Number(flag('--ui-port', fileConfig.mcp?.uiPort || fileConfig.uiPort || '4317')) || 4317;
-    const isChild = has('--child');
+    const isChild = has('--child'); if (!isChild) await showBanner();
 
     const { createMcpHttpServer, writeDaemonInfo, clearDaemonInfo, readDaemonInfo, arePortsBusy, existingDaemonMessage, runInRepo, addDaemonPid } = await import('../core/mcp/index.js');
     const { listRegisteredRepos } = await import('../core/repository/index.js'); const { createGraphUiServer } = await import('../ui/index.js');

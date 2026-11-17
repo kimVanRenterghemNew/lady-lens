@@ -39,10 +39,17 @@ describe('repository registry', () => {
 
         const resolvedB = resolveRepoTarget(entryB.id, regFile);
         expect(resolvedB.database).toBe(entryA.database);
+        expect(registerRepo(repoB, { nodes: 1 }, regFile).database).toBe(entryA.database); // a later sync keeps the shared database
 
         const removed = unregisterRepo(entryA.id, regFile);
         expect(removed.id).toBe(entryA.id);
         expect(listRegisteredRepos(regFile).length).toBe(1); // repoB remains
+
+        // a folder merged as a location of B has no entry of its own: registering it joins B's database
+        const repoC = path.join(tmpDir, 'repoC');
+        fs.mkdirSync(repoC, { recursive: true });
+        registerRepo(repoB, { locations: [repoC] }, regFile);
+        expect(registerRepo(repoC, { nodes: 2 }, regFile)).toMatchObject({ database: entryA.database, mergedInto: entryB.id });
 
         fs.rmSync(tmpDir, { recursive: true, force: true });
     });

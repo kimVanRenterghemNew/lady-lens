@@ -4,6 +4,8 @@ import os from 'os';
 import path from 'path';
 import { agentTargets, serverEntry, runAgentInstall, runSkillInstall, runRefresh, formatAgentInstall, agentInstallCommand } from '../core/mcp/index.js';
 
+import { banner, showBanner, sendFavicon, sendFaviconSvg, faviconPng } from '../core/branding/index.js';
+
 const LENS = path.resolve('bin/lens.mjs');
 const PACKAGE_VERSION = JSON.parse(fs.readFileSync(path.resolve('package.json'), 'utf8')).version;
 let home, env;
@@ -71,6 +73,23 @@ describe('agent install', () => {
         expect(fs.readFileSync(codexMd, 'utf8')).toBe(`${noFinalNewline}\n`); // only a missing final newline is not given back
         expect(fs.existsSync(path.join(home, '.vibe', 'AGENTS.md'))).toBe(false); // we made it, only our line was in it
         expect(status(runSkillInstall({ lensPath: LENS, env, action: 'uninstall' }), 'claude')).toBe('absent');
+    });
+
+    it('registers lady-lens in the YAML config of Hermes and the Copilot CLI format, keeping comments and other servers', () => {
+        const hermes = path.join(home, '.hermes', 'config.yaml'), mine = '# mine\nmodel: x # keep\nmcp_servers:\n  other:\n    command: foo\n';
+        fs.mkdirSync(path.dirname(hermes), { recursive: true });
+        fs.writeFileSync(hermes, mine);
+
+        expect(run({ ids: ['hermes', 'copilot-cli'] }).map(r => r.status)).toEqual(['installed', 'installed']);
+        const text = fs.readFileSync(hermes, 'utf8');
+        expect(text).toContain('# mine\nmodel: x # keep');
+        expect(text).toContain('other:\n    command: foo');
+        expect(text).toContain('lady-lens:');
+        expect(JSON.parse(fs.readFileSync(path.join(home, '.copilot', 'mcp-config.json'), 'utf8')).mcpServers['lady-lens']).toMatchObject({ type: 'local', tools: ['*'] });
+        expect(run({ ids: ['hermes'] })[0].status).toBe('unchanged');
+
+        expect(run({ ids: ['hermes'], action: 'uninstall' })[0].status).toBe('removed');
+        expect(fs.readFileSync(hermes, 'utf8')).toBe(mine);
     });
 
     it('registers lady-lens in the TOML configs of Codex and Mistral Vibe, and uninstall gives back every byte', () => {
@@ -144,6 +163,17 @@ describe('agent install', () => {
         const result = run()[0];
         expect(result.status).toBe('updated');
         expect(read(target('cursor').file).mcpServers['lady-lens'].env.LENS_MCP_VERSION).toBe(PACKAGE_VERSION);
+    });
+
+    it('reads one product name as all its agents: antigravity covers the app and the CLI, copilot and vscode cover VS Code and the Copilot CLI', () => {
+        const ids = (...names) => agentInstallCommand({ action: 'install', ids: names, lensPath: LENS, dryRun: true, env }).text.split('\n').filter(line => line.startsWith('installed')).map(line => line.split(/\s{2,}/)[1].trim().replace(/ C:.*$/, ''));
+        expect(ids('antigravity-windows')).toEqual(['Antigravity', 'Antigravity CLI']);
+        expect(ids('copilot')).toEqual(['VS Code', 'Copilot CLI']);
+        fs.writeFileSync(path.join(home, '.claude.json'), '{}');
+        expect(ids('claude')).toEqual(['Claude Code']); // only what is on this machine
+        const skills = agentInstallCommand({ action: 'install', ids: ['skill', 'antigravity'], lensPath: LENS, dryRun: true, env }).text;
+        expect(skills).toMatch(/Agents skill/);
+        expect(skills).toMatch(/Antigravity policy/);
     });
 
     it('creates the config of a named agent, and VS Code gets servers + type stdio', () => {
@@ -230,5 +260,31 @@ describe('agent install', () => {
         const { ok, text } = formatAgentInstall(run());
         expect(ok).toBe(true);
         expect(text).toContain('Restart the agent');
+    });
+});
+
+describe('branding', () => {
+    it('prints the banner only on a terminal', () => {
+        expect(banner('1.2.3', { isTTY: false })).toBe('');
+        process.env.LENS_NO_BANNER = '1';
+        expect(banner('1.2.3', { isTTY: true })).toBe('');
+        delete process.env.LENS_NO_BANNER;
+        expect(banner('1.2.3', { isTTY: true })).toContain('v1.2.3');
+        const chunks = [];
+        showBanner({ isTTY: true, write: text => chunks.push(text) });
+        expect(chunks.join('')).toMatch(/v\d+\.\d+/);
+        showBanner({ isTTY: false, write: text => chunks.push(text) });
+        expect(chunks).toHaveLength(2);
+    });
+
+    it('sends the favicon as a png', () => {
+        const sent = {};
+        sendFavicon({ writeHead: (status, headers) => Object.assign(sent, { status, headers }), end: body => { sent.body = body; } });
+        expect(sent.status).toBe(200);
+        expect(sent.headers['content-type']).toBe('image/png');
+        expect(sent.body.equals(faviconPng())).toBe(true);
+        sendFaviconSvg({ writeHead: (status, headers) => Object.assign(sent, { headers }), end: body => { sent.svg = body; } });
+        expect(sent.headers['content-type']).toBe('image/svg+xml');
+        expect(sent.svg.toString()).toContain('<svg');
     });
 });

@@ -3,6 +3,8 @@
 <head>
     <meta charset="utf-8">
     <title>lady-lens MCP Server</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" href="/favicon.png">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         :root {
@@ -128,8 +130,30 @@
     <div class="container">
         <div class="header">
             <span class="badge">Running · v{{VERSION}}</span>
-            <h1>lady-lens MCP Server</h1>
-            <p class="subtitle">Model Context Protocol endpoint for AI coding agents</p>
+            <div style="display:flex;align-items:center;gap:14px;margin-top:12px">
+            <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="52" height="52" fill="none" aria-hidden="true" style="flex-shrink:0">
+                <defs>
+                    <linearGradient id="folderGrad" x1="10" y1="14" x2="50" y2="48" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stop-color="#FB7185"/>
+                        <stop offset="100%" stop-color="#E11D48"/>
+                    </linearGradient>
+                    <linearGradient id="lensGlass" x1="28" y1="24" x2="48" y2="44" gradientUnits="userSpaceOnUse">
+                        <stop offset="0%" stop-color="#FFF1F2" stop-opacity="0.95"/>
+                        <stop offset="100%" stop-color="#FECDD3" stop-opacity="0.75"/>
+                    </linearGradient>
+                </defs>
+                <rect x="2" y="2" width="60" height="60" rx="16" fill="#FFF1F2" stroke="#FECDD3" stroke-width="2"/>
+                <path d="M14 21C14 18.7909 15.7909 17 18 17H26.3431C27.404 17 28.4214 17.4214 29.1716 18.1716L31.4142 20.4142C31.7893 20.7893 32.298 21 32.8284 21H46C48.2091 21 50 22.7909 50 25V43C50 45.2091 48.2091 47 46 47H18C15.7909 47 14 45.2091 14 43V21Z" fill="url(#folderGrad)"/>
+                <circle cx="38" cy="34" r="10.5" fill="#9F1239" fill-opacity="0.22"/>
+                <circle cx="37" cy="33" r="9.5" fill="url(#lensGlass)" stroke="#9F1239" stroke-width="3"/>
+                <path d="M44 40L51 47" stroke="#9F1239" stroke-width="4" stroke-linecap="round"/>
+                <path d="M32.5 29.5C33.8 28 35.8 27.3 37.8 27.6" stroke="#FFFFFF" stroke-width="2.2" stroke-linecap="round"/>
+            </svg>
+            <div>
+                <h1 style="margin:0 0 4px 0">lady-lens MCP Server</h1>
+                <p class="subtitle">Model Context Protocol endpoint for AI coding agents</p>
+            </div>
+            </div>
         </div>
 
         <div class="card">

@@ -9,36 +9,145 @@ let cy = null, flowNow = null, graphSeq = 0;
 function graphCanvas() {
   if (cy) return cy;
   cy = cytoscape({ container: $('#cy'), wheelSensitivity: 0.25, style: [
-    { selector: 'node', style: { 'background-color': 'data(color)', width: 44, height: 44, label: 'data(label)', color: '#fff', 'font-size': 8, 'text-valign': 'center', 'text-halign': 'center', 'text-wrap': 'ellipsis', 'text-max-width': 40, 'border-width': 2, 'border-color': '#0002' } },
+    { selector: 'node', style: { 'background-color': 'data(color)', width: 44, height: 44, label: 'data(label)', color: '#334155', 'font-size': 9, 'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-y': 4, 'text-wrap': 'ellipsis', 'text-max-width': 90, 'min-zoomed-font-size': 7, 'text-background-color': '#fff', 'text-background-opacity': 0.8, 'text-background-padding': 1, 'border-width': 2, 'border-color': '#cbd5e1' } },
     { selector: 'node[ring]', style: { 'border-color': 'data(ring)', 'border-width': 'data(ringWidth)' } },
-    { selector: 'node.flow', style: { shape: 'round-rectangle', width: 150, height: 34, 'text-max-width': 140, 'font-size': 10 } },
+    { selector: 'node.flow', style: { shape: 'round-rectangle', width: 150, height: 34, 'text-valign': 'center', 'text-margin-y': 0, color: '#fff', 'text-background-opacity': 0, 'text-max-width': 140, 'font-size': 10 } },
     { selector: 'node.root', style: { 'border-color': '#2563eb', 'border-width': 4 } },
     { selector: 'node.traced', style: { 'border-color': '#dc2626', 'border-width': 4, 'border-style': 'double' } },
     { selector: 'node.here', style: { 'border-color': '#2563eb', 'border-width': 5 } },
-    { selector: 'edge', style: { width: 1.2, 'line-color': '#94948c', 'target-arrow-color': '#94948c', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } }
+    { selector: 'edge', style: { width: 1.2, 'line-color': 'data(color)', 'target-arrow-color': 'data(color)', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier' } }
   ] });
-  cy.on('tap', 'node', e => {
-    const d = e.target.data();
-    if (d.flow) go({ tab: 'graph', path: d.path, line: d.line || 1 });
-    else go({ tab: 'search', path: d.path, line: 1 });
-  });
+  cy.on('tap', 'node', e => { hideNodeTip(true); go({ tab: 'graph', path: e.target.data('path'), line: e.target.data('line') || 1 }); });
+  cy.on('grab', 'node', e => !flowNow && tieBand(e.target));
+  cy.on('drag', 'node', dragWithNeighbours);
+  cy.on('mouseover', 'node', showNodeTip);
+  cy.on('mouseout', 'node', () => hideNodeTip(false));
   return cy;
 }
 
+const RELS = { IMPORTS: ['Importeert', '#94948c'], TESTS: ['Tests', '#2ecc71'], READS: ['Leest', '#e67e22'], RUNS: ['Voert uit', '#7c3aed'] };
+const off = new Set(['Test', 'TESTS', 'Doc']);
+const chip = (key, label, color, cls) => `<label class="chip"><input type="checkbox" data-key="${key}" ${off.has(key) ? '' : 'checked'}><i class="${cls}" style="background:${color}"></i>${label}</label>`;
+/** Chips double as legend: relations (line colour) and file types (node colour); unchecked ones vanish from the overview. */
+function drawFilters() {
+  const rels = Object.entries(RELS).map(([k, [l, c]]) => chip(k, l, c, 'rel'));
+  $('#graph-filters').innerHTML = [...rels, ...Object.entries(TYPES).map(([k, c]) => chip(k, k, c, ''))].join('');
+}
+
+const setMode = flow => { $('#graph-filters').hidden = $('#graph-layout').hidden = flow; $('#flow-opts').hidden = !flow; };
+
+const peekHtml = (d, line, text) => {
+  const rows = text.split('\n').map((l, i) => `<span class="row"><span class="ln">${line + i}</span>${hl(l)}</span>`).join('');
+  return `<div class="file-bar"><code>${esc(d.path)}</code><span>voorbeeld, klik voor alles${d.issues ? ` Â· ${esc(d.issues)}` : ''}</span></div><pre class="code">${rows}</pre>`;
+};
+
+/** Hovering a node previews its first lines in the code pane; leaving puts back what was there, a click keeps it. */
+async function showNodeTip(e) {
+  const d = e.target.data(), line = d.line || 1, box = $('#code-view');
+  hovered = d.id;
+  const r = await ask('read_chunk', { path: d.path, startLine: line, endLine: line + 13 });
+  if (hovered !== d.id || typeof r.content !== 'string') return;
+  peeked = peeked ?? box.innerHTML;
+  box.innerHTML = peekHtml(d, line, r.content);
+}
+
+function hideNodeTip(keep) {
+  if (peeked !== null && !keep) $('#code-view').innerHTML = peeked;
+  hovered = peeked = null;
+}
+
+const LAYOUTS = {
+  cose: {}, circle: {}, grid: {},
+  breadthfirst: { directed: true, spacingFactor: 1.1 },
+  concentric: { concentric: n => n.degree(), levelWidth: () => 2, minNodeSpacing: 20 }
+};
+
+/** Lays the overview out as the picked shape (cloud, tree, hierarchy, circle, grid). */
+function arrange() {
+  const name = $('#graph-layout').value;
+  cy.layout({ name, animate: false, padding: 30, ...LAYOUTS[name] }).run(); cy.fit(undefined, 30);
+}
+
+/** Rubber bands: a neighbour (and its neighbours, RINGS deep) keeps the distance it had to the node before it and is
+    pulled only once that band is stretched, less so the further out its ring and the further it is; while you drag it
+    also holds its angle, fading after release. Nodes that come too close push each other apart. */
+const RINGS = 4, STRETCH = 1.05, TENSION = 0.2, HOLD = 0.05, MIN_GAP = 80, FRAMES = 200;
+let band = [], free = new Set(), easing = false, energy = 0, fade = 1, hovered = null, peeked = null;
+
+const gap = (a, b) => ({ x: b.position().x - a.position().x, y: b.position().y - a.position().y });
+const nudge = (n, x, y) => n.shift({ x: x * fade, y: y * fade });
+
+function pull({ n, parent, rest, ring, off }) {
+  const d = gap(n, parent), len = Math.hypot(d.x, d.y) || 1;
+  const k = TENSION / (1 + ring * 0.7) / (1 + len / 500), over = Math.max(0, len - rest * STRETCH);
+  const hold = (HOLD * energy) / FRAMES / (1 + ring), keep = { x: d.x + off.x, y: d.y + off.y };
+  const [x, y] = [(d.x / len) * over * k + keep.x * hold, (d.y / len) * over * k + keep.y * hold];
+  nudge(n, x, y);
+  return Math.hypot(x, y) * fade > 0.5;
+}
+
+/** Pushes every pair closer than MIN_GAP apart; the node you hold does not give way. */
+function repel() {
+  const pts = cy.nodes().map(n => ({ n, ...n.position(), dx: 0, dy: 0, fixed: !free.has(n) }));
+  let moved = false;
+  for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) moved = separate(pts[i], pts[j]) || moved;
+  pts.forEach(p => !p.fixed && nudge(p.n, p.dx, p.dy));
+  return moved;
+}
+
+const pinned = (a, b) => a.fixed && b.fixed;
+
+function separate(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy) || 0.01;
+  if (len >= MIN_GAP || pinned(a, b)) return false;
+  const push = (MIN_GAP - len) * 0.15, share = 1 - Number(!a.fixed && !b.fixed) / 2;
+  [a, b].forEach((p, i) => { const s = i ? 1 : -1; p.dx += (dx / len) * push * s * (share * 2); p.dy += (dy / len) * push * s * (share * 2); });
+  return true;
+}
+
+function settle() {
+  const held = cy.nodes(':grabbed').length > 0;
+  energy -= held ? 1 : 6;
+  fade = held ? 1 : Math.max(0, Math.min(1, energy / 50));
+  const moved = band.map(pull).some(Boolean) | repel() | held;
+  easing = energy > 0 && moved > 0 && requestAnimationFrame(settle) > 0;
+}
+
+function tieBand(node) {
+  let seen = node, ring = node;
+  band = [];
+  for (let i = 0; i < RINGS; i++) {
+    const next = ring.neighborhood('node').not(seen);
+    next.forEach(n => { const parent = n.neighborhood('node').intersection(ring)[0], d = gap(n, parent); band.push({ n, parent, ring: i, rest: Math.max(Math.hypot(d.x, d.y), MIN_GAP), off: { x: -d.x, y: -d.y } }); });
+    seen = seen.union(next);
+    ring = next;
+  }
+  free = new Set(band.map(b => b.n));
+}
+
+function dragWithNeighbours() {
+  if (flowNow) return;
+  energy = FRAMES;
+  if (!easing) easing = requestAnimationFrame(settle) > 0;
+}
+
+const overviewOrEmpty = async () => { const ov = await getJson(api('/api/overview')); return ov.error ? { nodes: [], edges: [], error: ov.error } : ov; };
+
 async function drawOverview(path) {
-  const ov = await getJson(api('/api/overview')), g = graphCanvas();
+  const ov = await overviewOrEmpty(), g = graphCanvas();
   flowNow = null;
   g.elements().remove();
-  const shown = new Set(ov.nodes.slice(0, 100).map(n => n.id));
+  const shown = new Set(ov.nodes.filter(n => !off.has(typeOf(n.path, n.kind))).slice(0, 400).map(n => n.id));
   const mine = ov.nodes.find(n => n.path === path);
   if (mine && !shown.has(mine.id)) shown.add(mine.id);
   for (const n of ov.nodes.filter(n => shown.has(n.id))) {
     const iss = n.issues || [];
-    g.add({ data: { id: n.id, path: n.path, label: n.path.split('/').pop(), color: TYPES[typeOf(n.path, n.kind)], ring: iss.length ? (iss.length > 1 ? '#e5534b' : '#f0a020') : '#0002', ringWidth: iss.length ? 4 : 2 }, classes: n.path === path ? 'here' : '' });
+    g.add({ data: { id: n.id, path: n.path, type: typeOf(n.path, n.kind), label: n.path.split('/').pop(), issues: iss.join(', '), color: TYPES[typeOf(n.path, n.kind)], ring: iss.length ? (iss.length > 1 ? '#e5534b' : '#f0a020') : '#cbd5e1', ringWidth: iss.length ? 4 : 2 }, classes: n.path === path ? 'here' : '' });
   }
-  for (const e of ov.edges.filter(e => shown.has(e.from) && shown.has(e.to))) g.add({ data: { id: `${e.from}|${e.type}|${e.to}`, source: e.from, target: e.to } });
-  g.layout({ name: 'cose', animate: false, padding: 30 }).run();
-  $('#hint').textContent = `Overzicht: ${g.nodes().length} bestanden in beeld · ${ov.nodes.length} totaal` + (path ? ' · geen functie op deze plek' : '');
+  for (const e of ov.edges.filter(e => !off.has(e.type) && shown.has(e.from) && shown.has(e.to))) g.add({ data: { id: `${e.from}|${e.type}|${e.to}`, source: e.from, target: e.to, rel: e.type, color: RELS[e.type]?.[1] || '#94948c' } });
+  setMode(false);
+  arrange();
+  $('#hint').textContent = `Overzicht: ${g.nodes().length} bestanden in beeld, ${ov.nodes.length} totaal Â· klik een bestand voor de code, zet filters aan of uit voor andere relaties` + (path ? ' Â· geen functie op deze plek' : '');
 }
 
 /** Callers to the left (negative level), callees to the right, one column per level. */
@@ -52,9 +161,10 @@ function drawFlow(flow) {
     row.set(n.level, r + 1);
     g.add({ data: { id: n.id, flow: true, path: n.path, line: n.line, label: n.name, color: n.level < 0 ? '#7c3aed' : n.level > 0 ? '#0891b2' : '#2563eb' }, classes: ['flow', n.id === flow.root ? 'root' : '', traceMarks.has(n.id) ? 'traced' : ''].join(' '), position: { x: n.level * 210, y: (r - (count.get(n.level) - 1) / 2) * 60 } });
   }
-  for (const e of flow.edges) g.add({ data: { id: `${e.from}>${e.to}`, source: e.from, target: e.to } });
+  for (const e of flow.edges) g.add({ data: { id: `${e.from}>${e.to}`, source: e.from, target: e.to, color: '#94948c' } });
   g.layout({ name: 'preset', padding: 30 }).run();
-  $('#hint').textContent = `Stroomschema: ${flow.nodes.length} functies` + (flow.truncated ? ' (afgekapt)' : '') + ' · klik een functie om erheen te gaan';
+  setMode(true);
+  $('#hint').textContent = `Stroomschema: ${flow.nodes.length} functies` + (flow.truncated ? ' (afgekapt)' : '') + ' Â· klik een functie om erheen te gaan';
 }
 
 async function showFlow(place) {
@@ -71,10 +181,12 @@ async function showFlow(place) {
 
 define('lens-graph', {
   wire() {
+    $('#graph-layout').onchange = () => cy && !flowNow && arrange();
     $('#fit').onclick = () => cy?.fit(undefined, 30);
     $('#flow-depth').onchange = $('#flow-dir').onchange = () => showFlow(here);
     $('#flow-overview').onclick = () => go({ tab: 'graph', path: null, line: null });
-    $('#flow-code').onclick = () => go({ tab: 'search' });
+    drawFilters();
+    $('#graph-filters').onchange = e => { off[e.target.checked ? 'delete' : 'add'](e.target.dataset.key); drawOverview(here.path); };
     $('#flow-mermaid').onclick = () => {
       const box = $('#mermaid-out');
       box.textContent = flowNow?.mermaid || 'Geen stroomschema: ga eerst naar een functie.';

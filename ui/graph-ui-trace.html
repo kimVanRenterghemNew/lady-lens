@@ -5,7 +5,7 @@ const traceCode = async (el, path, line) => {
   const r = await ask('read_chunk', { path, startLine: Math.max(1, line - 2), endLine: line + 2 });
   if (r.error || typeof r.content !== 'string') { el.innerHTML = `<span class="muted">${esc(r.error || 'geen code')}</span>`; return; }
   const start = r.startLine || 1;
-  el.innerHTML = r.content.split('\n').map((l, i) => `<span class="${start + i === line ? 'hit' : ''}"><span class="ln">${start + i}</span>${esc(l)}</span>`).join('\n');
+  el.innerHTML = r.content.split('\n').map((l, i) => `<span class="${start + i === line ? 'hit' : ''}"><span class="ln">${start + i}</span>${hl(l)}</span>`).join('\n');
 };
 
 const frameHead = f => `<span class="badge ${f.status}">${{ project: 'project', ambiguous: 'kies', notFound: 'niet gevonden', library: 'bibliotheek' }[f.status]}</span> ` +

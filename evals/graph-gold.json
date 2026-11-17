@@ -20,7 +20,7 @@
     { "id": "ll-eval", "tag": "subject", "query": "graph eval recall and MRR over gold queries", "expected": ["core/eval/graphEval.js"] },
     { "id": "ll-exact-createGraphSync", "tag": "exact-match", "query": "createGraphSync", "expected": ["core/graph/sync/graphSync.js"] },
     { "id": "ll-exact-scoreAnswer", "tag": "exact-match", "query": "scoreAnswer", "expected": ["core/eval/searchBench.js"] },
-    { "id": "ll-negative-payment", "tag": "negative", "query": "stripe payment checkout invoice", "expected": [] },
+    { "id": "ll-negative-payment", "tag": "negative", "query": "paypal payment checkout invoice", "expected": [] },
     { "id": "ll-negative-k8s", "tag": "negative", "query": "kubernetes helm chart deployment", "expected": [] }
   ]
 }

@@ -1,0 +1,116 @@
+<!-- The Repos tab of `lens ui`, inserted into graph-ui.html by graph-ui.mjs: every registered repository with its size and
+     last sync, and what you can do with it (open, sync, rename, merge copies of one repository, remove). The repository
+     picker in the header is filled here too. -->
+<style>
+.repo-set { display: grid; gap: 10px; padding: 8px 0 12px; }
+.repo-set input[data-name], .repo-set input[data-extra] { min-width: 260px; }
+.repo-dirs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.repo-group td { padding-top: 14px; }
+</style>
+<script>
+const post = body => fetch('/api/repos/change', { method: 'POST', headers: { 'x-lens-ui': '1' }, body: JSON.stringify(body) }).then(r => r.json());
+let repoList = [];
+
+const pickRepos = current => fetch('/api/repos').then(r => r.json()).then(repos => {
+  const pick = $('#repo-pick');
+  pick.hidden = repos.length < 2;
+  pick.innerHTML = repos.map(r => `<option value="${esc(r.id)}"${r.id === REPO || r.path === current ? ' selected' : ''}>${esc(r.name || r.path)}</option>`).join('');
+  pick.onchange = () => { location.search = '?repo=' + encodeURIComponent(pick.value); };
+});
+
+const syncedAt = t => t ? new Date(t).toLocaleString('nl-BE') : 'nooit';
+const twin = r => repoList.filter(o => o.group === r.group && o.id !== r.id).sort((a, b) => b.nodes - a.nodes)[0];
+const btn = (act, r, label) => `<button data-act="${act}" data-id="${esc(r.id)}">${label}</button>`;
+
+const badge = text => ` <span class="badge">${text}</span>`;
+const spread = r => r.locations.length ? badge(`${r.locations.length + 1} locaties`) : r.copies > 1 ? badge(`${r.copies} kopieën`) : '';
+
+const title = r => `<b>${esc(r.name || r.path.split(/[\\/]/).pop())}</b>${r.exists ? '' : ' <span class="badge danger">map ontbreekt</span>'}${spread(r)}`;
+
+const places = r => [r.path, ...r.locations].map(p => `<small class="muted">${esc(p)}</small>`).join('<br>');
+
+const repoRow = r => `<tr data-id="${esc(r.id)}"><td>${title(r)}<br>${places(r)}</td>
+  <td>${r.nodes || 0}</td><td>${esc(r.branch || '')}</td><td>${syncedAt(r.lastSync)}</td>
+  <td>${btn('open', r, 'Openen')} ${btn('sync', r, 'Synchroniseren')} ${btn('settings', r, 'Naam &amp; mappen')} ${twin(r) ? btn('merge', r, 'Samenvoegen') : ''} ${btn('remove', r, 'Verwijderen')}</td></tr>`;
+
+const LANGS = {
+  'JavaScript / TypeScript': ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx'], '.NET': ['.cs', '.csproj', '.sln'], Python: ['.py'], Java: ['.java'], Kotlin: ['.kt', '.kts'],
+  Go: ['.go'], Rust: ['.rs'], PHP: ['.php'], Ruby: ['.rb'], Swift: ['.swift'], 'C / C++': ['.c', '.cc', '.cpp', '.cxx', '.h', '.hpp'], SQL: ['.sql'],
+  PowerShell: ['.ps1'], 'Documenten en config': ['.md', '.yaml', '.yml', '.json']
+};
+const known = new Set(Object.values(LANGS).flat());
+const langBox = (name, exts, on) => `<label class="chip"><input type="checkbox" data-lang="${esc(exts.join(','))}"${exts.some(e => on.includes(e)) ? ' checked' : ''}>${esc(name)} <small class="muted">${esc(exts.join(' '))}</small></label>`;
+const langChips = on => Object.entries(LANGS).map(([name, exts]) => langBox(name, exts, on)).join('');
+
+const detail = id => document.querySelector(`tr.repo-detail[data-id="${id}"]`);
+const folderBox = f => `<label class="chip"><input type="checkbox" data-dir="${esc(f.name)}"${f.excluded ? '' : ' checked'}>${esc(f.name)} <small class="muted">${f.excluded ? 'uitgesloten' : `${f.files} bestanden`}</small></label>`;
+const panel = (r, c) => `<td colspan="5"><div class="repo-set">
+  <label>Naam <input data-name value="${esc(r.name || '')}" placeholder="${esc(r.path.split(/[\\/]/).pop())}"> ${btn('saveName', r, 'Hernoemen')}</label>
+  <div><b>Mappen</b> <span class="muted">vink uit wat lady-lens moet overslaan</span><div class="repo-dirs">${c.folders.map(folderBox).join('') || '<span class="muted">geen mappen</span>'}</div></div>
+  <label>Overige uitsluitingen <input data-extra value="${esc(c.exclude_dirs.filter(d => !c.folders.some(f => f.name === d)).join(', '))}" placeholder="bv. src/generated, docs/oud"></label>
+  <label>Alleen indexeren vanaf <input data-roots value="${esc(c.graph_roots.join(', '))}" placeholder="."> <span class="muted">startmappen, '.' is de hele repo</span></label>
+  <div><b>Talen</b> <span class="muted">vink aan wat lady-lens moet indexeren</span><div class="repo-dirs">${langChips(c.graph_extensions)}</div></div>
+  <label>Andere extensies <input data-exts value="${esc(c.graph_extensions.filter(e => !known.has(e)).join(', '))}" placeholder=".reference, .vb"> <span class="muted">zonder garantie op ondersteuning</span></label>
+  <p class="muted">Instellingen in ${esc(c.file)}${c.exists ? '' : ' (wordt aangemaakt)'}</p>
+  ${btn('saveConfig', r, 'Opslaan en synchroniseren')}</div></td>`;
+
+async function toggleSettings(r) {
+  const open = detail(r.id);
+  if (open) return open.remove();
+  document.querySelector(`#repos-rows tr[data-id="${r.id}"]`).insertAdjacentHTML('afterend', `<tr class="repo-detail" data-id="${esc(r.id)}"><td colspan="5" class="muted">Laden…</td></tr>`);
+  const c = await fetch('/api/repos/config?id=' + encodeURIComponent(r.id)).then(res => res.json());
+  detail(r.id).innerHTML = c.error ? `<td colspan="5">${esc(c.error)}</td>` : panel(r, c);
+}
+
+const list = v => v.split(',').map(s => s.trim()).filter(Boolean);
+const langsOf = box => [...box.querySelectorAll('[data-lang]:checked')].flatMap(i => i.dataset.lang.split(','));
+const dirsOf = id => {
+  const box = detail(id), off = [...box.querySelectorAll('[data-dir]:not(:checked)')].map(i => i.dataset.dir);
+  const field = name => list(box.querySelector(`[data-${name}]`).value);
+  return { exclude_dirs: [...new Set([...field('extra'), ...off])], graph_roots: field('roots'), graph_extensions: [...new Set([...langsOf(box), ...field('exts')])] };
+};
+
+const ACTIONS = {
+  open: r => { location.search = '?repo=' + encodeURIComponent(r.id); },
+  sync: r => post({ action: 'sync', id: r.id }),
+  saveName: r => { const name = detail(r.id).querySelector('[data-name]').value.trim(); return name ? post({ action: 'rename', id: r.id, name }) : { error: 'vul een naam in' }; },
+  saveConfig: async r => { const saved = await post({ action: 'config', id: r.id, ...dirsOf(r.id) }); return saved.error ? saved : post({ action: 'sync', id: r.id }); },
+  merge: r => confirm(`${r.path} samenvoegen met ${twin(r).path}? Deze registratie verdwijnt, de map blijft staan.`) && post({ action: 'merge', id: r.id, into: twin(r).id }),
+  remove: r => confirm(`${r.path} uit lady-lens verwijderen? De map zelf blijft staan.`) && post({ action: 'remove', id: r.id })
+};
+
+const groupHead = (r, i, all) => {
+  const mates = all.filter(o => o.group === r.group);
+  if (mates.length < 2 || (i && all[i - 1].group === r.group)) return '';
+  return `<tr class="repo-group"><td colspan="5"><b>${esc(mates[0].name || mates[0].path.split(/[\\/]/).pop())}</b> <span class="muted">${mates.length} kopieën van dezelfde repository</span></td></tr>`;
+};
+
+async function loadRepos() {
+  repoList = (await fetch('/api/repos/all').then(r => r.json())).sort((a, b) => String(a.group).localeCompare(String(b.group)) || b.nodes - a.nodes);
+  $('#repos-rows').innerHTML = repoList.map((r, i) => groupHead(r, i, repoList) + repoRow(r)).join('');
+}
+
+const say = out => out?.error ? `Mislukt: ${out.error}` : out ? 'Klaar.' : '';
+
+async function onRepoAction(e) {
+  const button = e.target.closest('[data-act]');
+  if (!button) return;
+  const repo = repoList.find(r => r.id === button.dataset.id);
+  if (button.dataset.act === 'settings') return toggleSettings(repo);
+  button.disabled = true;
+  button.textContent = 'Bezig…';
+  const out = await ACTIONS[button.dataset.act](repo);
+  answers.clear();
+  $('#repos-msg').textContent = say(out);
+  await loadRepos();
+}
+
+define('lens-repos', {
+  wire() {
+    this.innerHTML = `<div style="width:100%;padding:20px;overflow:auto"><div class="card"><h3>Repositories</h3><p id="repos-msg" class="muted">Synchroniseren kan even duren. Samenvoegen kan alleen bij kopieën van dezelfde repository.</p>
+      <table class="data-table"><thead><tr><th>Repository</th><th>Nodes</th><th>Branch</th><th>Laatste sync</th><th>Acties</th></tr></thead><tbody id="repos-rows"></tbody></table></div></div>`;
+    this.onclick = onRepoAction;
+  },
+  load: loadRepos
+});
+</script>

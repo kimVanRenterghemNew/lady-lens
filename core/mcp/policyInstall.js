@@ -26,6 +26,10 @@ export function policyTargets({ home = os.homedir(), platform = process.platform
         link({ id: 'copilot', label: 'Copilot policy', marker: path.join(home, '.copilot'), file: path.join(home, '.copilot', 'copilot-instructions.md') }),
         link({ id: 'codex', label: 'Codex policy', marker: path.join(home, '.codex'), file: path.join(home, '.codex', 'AGENTS.md') }),
         link({ id: 'vibe', label: 'Mistral Vibe policy', marker: path.join(home, '.vibe'), file: path.join(home, '.vibe', 'AGENTS.md') }),
+        link({ id: 'gemini-cli', label: 'Gemini CLI policy', marker: path.join(home, '.gemini', 'settings.json'), file: path.join(home, '.gemini', 'GEMINI.md') }),
+        link({ id: 'opencode', label: 'OpenCode policy', marker: path.join(home, '.config', 'opencode'), file: path.join(home, '.config', 'opencode', 'AGENTS.md') }),
+        link({ id: 'kilo', label: 'Kilo policy', marker: path.join(home, '.config', 'kilo'), file: path.join(home, '.config', 'kilo', 'AGENTS.md') }),
+        link({ id: 'droid', label: 'Factory Droid policy', marker: path.join(home, '.factory'), file: path.join(home, '.factory', 'AGENTS.md') }),
         { id: 'vscode', label: 'VS Code policy', marker: vscodeUser, file: path.join(vscodeUser, 'prompts', 'lady-lens.instructions.md'), general, header: "---\napplyTo: '**'\n---\n\n" },
         { id: 'antigravity', label: 'Antigravity policy', marker: path.join(home, '.gemini', 'config'), file: path.join(home, '.gemini', 'config', 'rules', 'lady-lens.md'), general, header: '---\ntrigger: always_on\n---\n\n' }
     ];

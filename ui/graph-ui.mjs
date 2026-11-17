@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 import { codeHealth } from '../core/graph/index.js';
 import { traceView, locateFrames, callFlow, toMermaid, codeHistory } from '../core/search/index.js';
 import { createGit } from '../core/git/index.js';
+import { sendFavicon, sendFaviconSvg } from '../core/branding/index.js';
+import { repoRoutes } from './graph-ui-repos.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const read = name => fs.readFileSync(path.join(HERE, name), 'utf8');
@@ -45,6 +47,10 @@ function readBody(req, max) {
 }
 
 const ROUTE_HANDLERS = {
+    '/favicon.svg': (_req, res) => sendFaviconSvg(res),
+    '/favicon.png': (_req, res) => sendFavicon(res),
+    '/favicon.ico': (_req, res) => sendFavicon(res),
+
     '/'(_req, res, _url, { send }) {
         send(res, 200, PAGE, 'text/html; charset=utf-8');
     },
@@ -58,7 +64,7 @@ const ROUTE_HANDLERS = {
     },
 
     '/api/repos'(_req, res, _url, { send, listRepos }) {
-        send(res, 200, listRepos().map(({ id, path: repoPath }) => ({ id, path: repoPath })));
+        send(res, 200, listRepos().map(({ id, path: repoPath, name }) => ({ id, path: repoPath, name: name || null })));
     },
 
     async '/api/repo'(_req, res, url, { send, inRepo, repo }) {
@@ -141,18 +147,19 @@ const ROUTE_HANDLERS = {
  * @param {{tools: Record<string, Function>, loadOverview: () => Promise<{nodes: object[], edges: object[]}>}} deps
  * @returns {http.Server}
  */
-export function createGraphUiServer({ tools, loadOverview, repo = null, runInRepo = null, listRepos = () => [], gitFor = root => createGit({ root }) }) {
+export function createGraphUiServer({ tools, loadOverview, repo = null, runInRepo = null, listRepos = () => [], repos, gitFor = root => createGit({ root }) }) {
     const send = (res, status, body, type = 'application/json; charset=utf-8') => {
         res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
         res.end(type.startsWith('application/json') ? JSON.stringify(body) : body);
     };
     const inRepo = (url, fn) => runInRepo ? runInRepo(url.searchParams.get('repo'), fn) : fn({ path: repo });
-    const ctx = { send, inRepo, tools, loadOverview, repo, gitFor, listRepos };
+    const ctx = { send, inRepo, tools, loadOverview, repo, gitFor, listRepos, readBody, canSwitch: Boolean(runInRepo) };
+    const routes = { ...ROUTE_HANDLERS, ...repoRoutes(repos) };
 
     return http.createServer(async (req, res) => {
         const url = new URL(req.url, 'http://localhost');
         try {
-            const handler = ROUTE_HANDLERS[url.pathname];
+            const handler = routes[url.pathname];
             if (!handler) return send(res, 404, { error: 'not found' });
             await handler(req, res, url, ctx);
         } catch (error) {
