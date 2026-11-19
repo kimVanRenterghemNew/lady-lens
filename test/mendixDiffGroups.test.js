@@ -6,7 +6,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mendixDiff } from '../core/mendix/index.js';
-import { groupRegisteredRepos, writeRegistry, canonicalRepoPath } from '../core/repository/index.js';
+import { execFileSync } from 'child_process';
+import { groupRegisteredRepos, writeRegistry, canonicalRepoPath, resolveRefTarget } from '../core/repository/index.js';
 import { createGit } from '../core/git/index.js';
 import { mendixRepo, unitId } from './helpers/mendixProject.js';
 
@@ -120,6 +121,39 @@ describe.skipIf(!hasSqlite)('cross-folder mendix_diff resolution (AC 2, 3, 4, 7,
             }
         };
         await expect(mendixDiff({ from: 'main', to: 'feature', git })).rejects.toThrow(/dubious ownership/);
+    });
+});
+
+// no sqlite needed: runs on Node 20 too, where the block above is skipped
+describe('ref resolution without a Mendix model', () => {
+    const gitRepo = (branch) => {
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-group-'));
+        cleanups.push(() => fs.rmSync(root, { recursive: true, force: true }));
+        const run = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main', ...args], { cwd: root, encoding: 'utf8' }).trim();
+        run('init', '-q');
+        run('checkout', '-q', '-b', branch);
+        fs.writeFileSync(path.join(root, 'a.txt'), branch);
+        run('add', '.');
+        run('commit', '-q', '-m', branch);
+        return { root, head: run('rev-parse', 'HEAD') };
+    };
+
+    it('finds a ref on disk, in the root, in another folder of the group, or says where it looked', () => {
+        const ere = gitRepo('ere'), fix = gitRepo('bugfix');
+        const registryFile = path.join(os.tmpdir(), `lens-reg-plain-${Date.now()}.json`);
+        cleanups.push(() => fs.rmSync(registryFile, { force: true }));
+        writeRegistry({ repos: {
+            ere: { id: 'ere', path: ere.root, rootCommit: 'shared', branch: 'ere' },
+            fix: { id: 'fix', path: fix.root, rootCommit: 'shared', branch: 'bugfix' }
+        } }, registryFile);
+        const resolve = (ref) => resolveRefTarget({ ref, root: fix.root, registryFile });
+
+        expect(resolve(ere.root)).toMatchObject({ folder: canonicalRepoPath(ere.root), isFolder: true, dirty: false });
+        expect(resolve('bugfix')).toMatchObject({ folder: canonicalRepoPath(fix.root), branch: 'bugfix', commit: fix.head, dirty: false });
+        expect(resolve('ere')).toMatchObject({ folder: canonicalRepoPath(ere.root), branch: 'ere', commit: ere.head, isFolder: true });
+        expect(resolve(ere.head)).toMatchObject({ folder: canonicalRepoPath(ere.root), commit: ere.head, isFolder: true });
+        expect(resolve('nowhere').error).toMatch(/branch "nowhere" not found in group folders: .*\(ere\).*\(bugfix\)/);
+        expect(resolveRefTarget({ ref: 'nowhere', root: ere.root, registryFile: path.join(os.tmpdir(), 'lens-no-registry.json') }).error).toMatch(/\(ere\)/);
     });
 
     it('covers resolveRefTarget edge cases and non-git helpers', async () => {

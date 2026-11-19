@@ -11,7 +11,9 @@ import {
     PROJECT_SCOPE,
     sessionScope,
     createGraphSync,
-    coverageFromSummary
+    coverageFromSummary,
+    nodeMatchesKind,
+    warmNameIndex
 } from '../graph/index.js';
 
 export function readRepoFile(rel) {
@@ -104,6 +106,7 @@ export async function loadGraphModel({ sessionId, text, includeProject, includeD
         scopes: { session: counts(sessionScope(sessionId)), project: includeProject ? counts(PROJECT_SCOPE) : null }
     };
     GRAPH_MODEL_CACHE.set(cacheKey, model);
+    warmNameIndex(graph, [...graph.nodes.values()].filter(node => nodeMatchesKind(node, 'code')));
     return model;
 }
 

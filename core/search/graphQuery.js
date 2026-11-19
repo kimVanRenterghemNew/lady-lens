@@ -92,7 +92,7 @@ function executeGeneralTextQuery(graph, directMatches, limit, kind) {
 async function executeTextQuery(graph, text, args) {
     const limit = args.limit || TEXT_LIMIT;
     const context = await buildContextFromGraph(graph, text, { limit });
-    const directMatches = rankGraphNodes(graph, text, { limit, kind: args.kind }).map(e => e.node);
+    const directMatches = rankGraphNodes(graph, text, { limit, kind: args.kind, names: args.names !== false, ranking: args.ranking }).map(e => e.node);
     const result = args.kind === 'doc'
         ? executeDocTextQuery(graph, text, directMatches, limit)
         : executeGeneralTextQuery(graph, directMatches, limit, args.kind);

@@ -48,6 +48,8 @@ export function benchOperations({ root, repository, targets }) {
         ['load graph: warm', () => loadGraphModel(MODEL_ARGS), { repeat: 5 }],
         ['query: rankGraphNodes', () => rankGraphNodes(graph, nextQuery(), { limit: 10 }), { repeat: 10 }],
         ['query: graph_query', () => graph_query({ sessionId: 'bench', query: nextQuery(), limit: 10 }), { repeat: 3 }],
+        // kind code: the learned name ranking (the other queries rank without it)
+        ['query: graph_query code', () => graph_query({ sessionId: 'bench', query: nextQuery(), limit: 10, kind: 'code' }), { repeat: 3 }],
         ['direct: definedIn', () => definedInTool({ symbol }), { repeat: 5 }],
         ['direct: exports', () => exportsTool({ file }), { repeat: 5 }],
         ['direct: imports', () => imports({ file }), { repeat: 5 }],

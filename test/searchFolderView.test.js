@@ -128,7 +128,7 @@ describe('search folderView and functionView tools', () => {
             expect(root.view).toMatchObject({ folder: '', found: true });
             expect(root.view.parts.length).toBeGreaterThan(0);
             expect((await packageFolderView('lady-lens/graph')).view).toMatchObject({ folder: 'core/graph', found: true });
-        }, 20000);
+        }, 60000); // two full syncs of the whole repo; Linux CI with coverage measured 16-24 s, so 20 s was on the edge
 
         it('resolves an installed package and renders view exercising readFile', async () => {
             const res = await packageFolderView('acorn');

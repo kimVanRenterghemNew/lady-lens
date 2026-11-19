@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { parse } from 'acorn';
 import { normalizeNodeId } from '../../model/index.js';
-import { analyzeSource, fileKindOf, configFilesNamed, analyzeSourceForLanguage, commentWordsOf } from '../../sync/index.js';
+import { analyzeSource, fileKindOf, configFilesNamed, analyzeSourceForLanguage, commentWordsOf, testNamesOf } from '../../sync/index.js';
 
 function normalizeAstValue(value) {
     if (Array.isArray(value)) return value.map(normalizeAstValue);
@@ -42,7 +42,16 @@ export function fileNodeId(relativePath) {
 
 export const MAX_AST_SOURCE = 512 * 1024;
 
-function codeEntityMetadata(source, facts) {
+/** A test file keeps its test names (the name ranking gives them to the files it tests); other files nothing. */
+function testNamesMeta(source, kind) {
+    const testNames = kind === 'test' ? testNamesOf(source) : [];
+    return testNames.length ? { testNames } : {};
+}
+
+/** The types a file declares and the type names it uses (C#: sync links them file to file); nothing for other languages. */
+const typeRefsMeta = (facts) => (facts.typeRefs ? { types: facts.types, typeRefs: facts.typeRefs, ...(facts.namespace ? { namespace: facts.namespace } : {}) } : {});
+
+function codeEntityMetadata(source, facts, kind) {
     const meta = {
         lines: source.split(/\r?\n/).length,
         exports: facts.exports,
@@ -54,7 +63,9 @@ function codeEntityMetadata(source, facts) {
         functions: facts.functions,
         fileSmells: facts.fileSmells || [],
         reads: configFilesNamed(source),
-        commentWords: commentWordsOf(source)
+        commentWords: commentWordsOf(source),
+        ...testNamesMeta(source, kind),
+        ...typeRefsMeta(facts)
     };
     if (facts.callbacks) meta.callbacks = facts.callbacks;
     if (facts.parseError) meta.parseError = facts.parseError;
@@ -79,7 +90,7 @@ export function buildCodeEntity(relativePath, source, { now = new Date().toISOSt
         name: relativePath.split('/').pop(),
         contentHash: crypto.createHash('sha256').update(source).digest('hex'),
         documentation: facts.purpose,
-        metadata: codeEntityMetadata(source, facts),
+        metadata: codeEntityMetadata(source, facts, kind),
         // a tree is ~9x its source: none for a bundle over MAX_AST_SOURCE, so one vendored file cannot fill memory or the buffer
         ...(includeAst && isJs && source.length <= MAX_AST_SOURCE ? { ast: parseJavaScriptAst(source) } : {}),
         createdAt: now,

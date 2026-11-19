@@ -3,6 +3,7 @@
  * Extracts symbols, ranges, exports, imports, calls and complexity using data-driven language configs.
  */
 import { findIndentedBlockEnd } from './blocks.js';
+import { typeRefsOf } from './typeRefs.js';
 
 export function buildLineOffsets(source) {
     const offsets = [0];
@@ -79,11 +80,13 @@ function addTypeSymbol(name, index, getLine, result) {
 }
 
 function extractTypes(source, config, commentPrefixes, getLine, result) {
-    if (!config.typePattern) return;
+    if (!config.typePattern) return [];
+    const types = [];
     for (const match of source.matchAll(config.typePattern)) {
         const name = matchTypeName(source, match, commentPrefixes);
-        if (name) addTypeSymbol(name, match.index, getLine, result);
+        if (name) { addTypeSymbol(name, match.index, getLine, result); types.push(name); }
     }
+    return types;
 }
 
 function extractPatternItem(source, match, commentPrefixes) {
@@ -180,7 +183,9 @@ export function extractWithConfig(source, config, filePath) {
     const result = createExtractionResult(config, source);
 
     extractImports(source, config, result);
-    extractTypes(source, config, commentPrefixes, getLine, result);
+    const types = extractTypes(source, config, commentPrefixes, getLine, result);
+    // a language with typeRefPattern (C#) keeps its own types and the type names it uses (typeRefs.js)
+    if (config.typeRefPattern) Object.assign(result, typeRefsOf(source, config, types, index => isCommentLine(source, index, commentPrefixes)));
 
     const methodMatches = [];
     matchMethodPatterns(source, collectExtractionPatterns(config), commentPrefixes, methodMatches);

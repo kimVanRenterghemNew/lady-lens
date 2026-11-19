@@ -139,6 +139,9 @@ core/
   repository/                # register van projecten (id, pad, database)
   graph/
     model/ query/ sync/      # puur: graafmodel, vragen, indexeren
+                             # query/graphRank.js: termen; query/nameRank.js: woorden en woordparen uit namen;
+                             # query/nameWords.js, nameTests.js: woorden, rol test; sync/testNames.js: testnamen
+                             # query/nameModel.js + nameTraining.js: geleerde ranking en training (DOCUMENTATIE.md §1)
     repository/              # scopes, validatie, DTO's
     ports/graphStorePort.js
     adapters/{ladybug,memory}/

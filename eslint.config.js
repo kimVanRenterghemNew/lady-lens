@@ -6,7 +6,7 @@ import { DESIGN_FILES, DESIGN_RULES, CLASS_RULES, baselineFiles } from './script
 const legacy = baselineFiles();
 
 export default [
-  { ignores: ['node_modules/**', 'outputs/**', 'vault/**', '**/*.generated.js', '.claude/**'] },
+  { ignores: ['node_modules/**', 'outputs/**', 'vault/**', '**/*.generated.js', '.claude/**', 'localtests/**', 'scratch/**'] }, // localtests/ and scratch/ stay outside git
   js.configs.recommended,
   {
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.node } },

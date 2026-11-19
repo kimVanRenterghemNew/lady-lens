@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -166,7 +166,7 @@ describe('agent install', () => {
     });
 
     it('reads one product name as all its agents: antigravity covers the app and the CLI, copilot and vscode cover VS Code and the Copilot CLI', () => {
-        const ids = (...names) => agentInstallCommand({ action: 'install', ids: names, lensPath: LENS, dryRun: true, env }).text.split('\n').filter(line => line.startsWith('installed')).map(line => line.split(/\s{2,}/)[1].trim().replace(/ C:.*$/, ''));
+        const ids = (...names) => agentInstallCommand({ action: 'install', ids: names, lensPath: LENS, dryRun: true, env }).text.split('\n').filter(line => line.startsWith('installed')).map(line => line.split(/\s{2,}/)[1].trim().replace(/ (?:[A-Za-z]:|\/).*$/, '')); // the config path: C:\… on Windows, /… elsewhere
         expect(ids('antigravity-windows')).toEqual(['Antigravity', 'Antigravity CLI']);
         expect(ids('copilot')).toEqual(['VS Code', 'Copilot CLI']);
         fs.writeFileSync(path.join(home, '.claude.json'), '{}');
@@ -264,7 +264,10 @@ describe('agent install', () => {
 });
 
 describe('branding', () => {
+    afterEach(() => vi.unstubAllEnvs());
+
     it('prints the banner only on a terminal', () => {
+        vi.stubEnv('NO_COLOR', ''); // a shell with NO_COLOR set (agent terminals) would hide the banner
         expect(banner('1.2.3', { isTTY: false })).toBe('');
         process.env.LENS_NO_BANNER = '1';
         expect(banner('1.2.3', { isTTY: true })).toBe('');

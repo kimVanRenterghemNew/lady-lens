@@ -167,4 +167,41 @@ describe('git hooks journey tests (AC5, J1, J2, J3)', () => {
             await new Promise(resolve => server.close(resolve));
         }
     });
+
+    // A fake `lens` on PATH: the hook's own `lens sync` (a new process, on Windows maybe a console window) leaves a marker.
+    function hookWithFakeLens(port) {
+        installHooks({ repo: tempDir });
+        const postCommit = path.join(tempDir, '.git', 'hooks', 'post-commit');
+        fs.writeFileSync(postCommit, fs.readFileSync(postCommit, 'utf8').replace('4318', String(port)));
+        const bin = path.join(tempDir, 'bin');
+        fs.mkdirSync(bin);
+        fs.writeFileSync(path.join(bin, 'lens'), '#!/bin/sh\necho "$@" >> lens-ran\n', { mode: 0o755 });
+        const env = { ...process.env, LENS_HOOKS: '1', PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+        expect(spawnSync('sh', [postCommit], { cwd: tempDir, env }).status).toBe(0);
+        return path.join(tempDir, 'lens-ran');
+    }
+    const settle = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+    it('a busy daemon (slow to answer) gets the sync; the hook starts no second lens sync of its own', async () => {
+        const busy = http.createServer(() => { /* answers late: a daemon in the middle of a sync */ });
+        const port = await new Promise(resolve => busy.listen(0, '127.0.0.1', () => resolve(busy.address().port)));
+        try {
+            const marker = hookWithFakeLens(port);
+            await settle(2500);
+            expect(fs.existsSync(marker)).toBe(false);
+        } finally {
+            busy.closeAllConnections();
+            await new Promise(resolve => busy.close(resolve));
+        }
+    });
+
+    it('without a daemon the hook still runs lens sync itself', async () => {
+        const probe = http.createServer();
+        const port = await new Promise(resolve => probe.listen(0, '127.0.0.1', () => resolve(probe.address().port)));
+        await new Promise(resolve => probe.close(resolve));
+        const marker = hookWithFakeLens(port);
+        // a refused connection to localhost takes ~2 s on Windows
+        for (let i = 0; i < 80 && !fs.existsSync(marker); i++) await settle(100);
+        expect(fs.readFileSync(marker, 'utf8').trim()).toBe('sync');
+    }, 15000);
 });

@@ -97,6 +97,92 @@ The code base follows a strict **hexagonal architecture (ports and adapters)**:
 - **Query and view ports**: `functionView`, `folderView`, `codeHealth`, `rankGraphNodes`, `impact`.
 - **Primary adapters**: reachable through the **npm package**, the **MCP server (Model Context Protocol)** and the **CLI (`lens`)**.
 
+### How `graph_query` ranks code: terms and names
+
+A text query is ranked by `rankGraphNodes` (`core/graph/query/graphRank.js`). With `kind: 'code'`, `kind: 'all'` or no kind, two orders are made: the term order and the name order (over the code files only, so names never lift a document or a decision; `kind: 'doc'` and `'test'` rank on terms alone). Two ways turn them into one ranking:
+
+- **fusion (default, `nameFusion.js`):** when the gate opens, reciprocal rank fusion of the term order (top 20, weight 1) and the name order (top 50, weight 0.4): `weight / (5 + rank)` per order, summed; otherwise the term order stays as it is.
+- **learned (opt-in, `nameModel.js`):** a linear model over the name vector of each candidate (below). Ask for it with `graph_query` `ranking: 'learned'`, `rankGraphNodes(…, { ranking: 'learned' })` or `{ nameModel }`, or for a whole process with `configureNameModel(NAME_MODEL)`.
+
+The learned ranking won on lens's own eval sets but lowered a host's plan-pick cases (long requests with many domain words), so the default stays the fusion, which lowers none.
+
+```text
+query ──► graphRank.js ── term order (top 20) ───────────┐
+            │  tokenize, IDF per term, name/export/       ├─► fusion (default): gate, RRF ─► ranked files
+            │  purpose matches, bonuses                   │
+            └► nameRank.js ── name order (top 50) ───────┴─► learned (opt-in): feature rows,
+                 words and word pairs of the names,            Σ w · (x − mean) / std ─► ranked files
+                 IDF per feature
+```
+
+**Why names.** The term order counts each word of 3+ letters on its own. A query often names a concept that lives in a *name* ("task id" → `TASK_ID_RE`, "plan ids" → `planIds`). There `id` is too short to count, and `task` and `id` in two unrelated places score the same as `task→id` in one name. The name order keeps short words and the order of words.
+
+**How the name order works** (`core/graph/query/nameRank.js`, no new nodes, no schema change):
+
+1. **Words of a name.** `nameParts` splits camelCase, capital runs and every non-letter: `TASK_ID_RE` → `task id re`, `HTTPServer` → `http server`. Words of 2+ letters count, stop words and numbers do not.
+2. **Features.** `features` makes, from a run of words: single words (`u:task`), neighbour pairs with their order (`b:task>id`) and skip pairs up to 3 words apart (`s:task>plan`).
+3. **Index per file**, with a role weight: what a file *is* weighs more than what it *uses*.
+
+   | Role | Source on the `CodeFile` node | Weight |
+   | :--- | :--- | ---: |
+   | name | path (folders and file name), `exports`, `symbols` | 2 |
+   | purpose | `purpose`, per sentence | 1.5 |
+   | use | callees in `calls`, `reads` | 0.4 |
+
+   A feature keeps the highest role it has in that file. `buildNameIndex` keeps, per feature, the list of files with their weight; the length of that list is the document frequency.
+4. **Name vector** (`nameVectors`). The query gets the same features, plus the same sentence with each word in its first lexicon translation (so Dutch questions form English pairs too). Per file the matches are summed per kind × role, kept apart: `Σ ln(1 + N / df)` for `u|name`, `b|name`, `s|purpose`, … (9 numbers). `nameScores` is the hand-weighted sum of them (kind 1 / 2.5 / 1.5 × role 2 / 1.5 / 0.4) and gives the name order.
+Steps 5–7 are the learned ranking (opt-in); the default fusion uses the name order of step 4 as it is.
+
+5. **Candidates** (`nameCandidates`). The term order's top 20 and the name order's top 50. Each candidate gets a feature row: `ln(1 + x)` of its 9 vector numbers, `1 / (6 + term rank)` (0 outside the term order), and the role **test**: `ln(1 + Σ idf)` of the query's words and neighbour pairs in the names of the tests that cover the file (`u|test`, `b|test`). Sync stores those names on each test file (`testNames`: the titles of `describe`/`it`/`test`, Python `test_…` functions, C# methods under `[Fact]`/`[Test]`/`[TestMethod]`/…); `TESTS` edges give them to the code they test. A database synced before 1.8.2 has no `testNames` until `lens sync --full`: the role is then 0 and the ranking is that of the other features.
+6. **Brake on name-only candidates.** A file the term order does not hold ranks with the rest only when the gate opens (`gateOpens`: the best name hit has a query pair in a name or purpose and leads the fifth hit by 1.5 ×). Otherwise the model reorders the term order and the name-only files follow it. A long request with many domain words otherwise lets many weak name hits in.
+7. **Learned score** (`rankWithNameModel`, `NAME_MODEL`). A linear model: `Σ w · (x − mean) / std`, best first. The weights are learned, not chosen: on pairs "paragraph of a document ↔ the code file it names" (the name taken out of the text), with a pairwise logistic loss and gradient descent (`trainNameModel`, `evals/learnNameModel.mjs`). The shipped weights: term rank 0.72, pair in a name 0.27, pair in what a file uses 0.27, word in a name 0.27, pair in a test name 0.15, a loose word in a test name −0.15, the rest 0.06–0.18. "task id" ranks the file that defines `TASK_ID_RE` higher. The `score` of each result stays its term score; term results beyond the candidates follow.
+
+**Training is deterministic.** Documents are sorted by path, a paragraph repeated in a mirror counts once, documents are split into training and held-out by a seeded shuffle, and training runs full-batch from zero weights: the same input gives byte-equal weights (tested). `node evals/learnNameModel.mjs --repo <synced dir>[=<exclude file>] … --out model.json` reproduces `NAME_MODEL` from the two repositories it was learned on.
+
+**Public API** (from `lady-lens` and `lady-lens/graph`): every step is a port, so a caller can rank its own entries, train on the pairs it selects, and give lens its model.
+
+```js
+import { nameParts, nameFeatures, buildNameIndex, nameScores, nameVectors, rankWithNameModel,
+         namePairsFromDocs, nameTrainingExamples, trainNameModel, configureNameModel, NAME_MODEL } from 'lady-lens';
+
+nameParts('TASK_ID_RE');            // ['task', 'id', 're']
+nameFeatures('task id');            // ['u:task', 'b:task>id', 'u:id']; prefix = kind (u word, b pair, s skip pair)
+
+// rank your own entries, no graph: the test file of a source file
+const tests = buildNameIndex(testPaths.map(path => ({ path })));   // entries: { path, exports?, symbols?, purpose?, calls?, reads? }
+rankWithNameModel(tests, 'core/routing/modeClassifier.js')[0];     // { node, score, row }; no brake: every entry is your own
+buildNameIndex(codeNodes, { testNamesOf: node => namesOfItsTests }); // your own test link, for the role test
+nameIndexFor(graph, codeNodes);                                      // the index graph_query uses (test names from TESTS edges)
+
+// train on what you select, and use it
+const pairs = namePairsFromDocs(docs, codePaths, { include: ['docs/'], exclude: ['backlog/'] }); // or your own [{ text, files }]
+const model = trainNameModel(nameTrainingExamples(buildNameIndex(codeNodes), pairs, termOrderFor));
+configureNameModel(model);          // every code query of this process; null = NAME_MODEL again
+rankGraphNodes(graph, text, { kind: 'code', nameModel: model });   // or per call
+```
+
+IDF is counted over the entries you pass, so pass the whole set you choose from (for example every test file of the repo). Over MCP, `graph_query` takes `names: false` for the term order alone, and **`name_match`** does the same name matching on files you choose: `{ text, files? | glob?, limit? }` → `[{ path, kind, score, pairs, words }]`, the pairs and words being the reasons (e.g. the test file of a source file: `text` = the source path, `glob` = `"test/**"`; or the code a paragraph of a document is about: `text` = the paragraph, `glob` = `"core/**"`, and `doc` = the document's path, so the files that document names elsewhere come first when one of them is a clear match (a word pair, twice the score of the next; marked `fromDoc`). Measured on documents that name a file, with the name taken out: without `doc` the right file is in the top 3 for 35–82 %; with `doc` a `fromDoc` match was the named file 81 % of the time on one repo's docs and 49 % on another's (docs that name many files per page), and the named file, a file of the same section or a direct graph neighbour of it 83 % and 60 %. So it stays a suggestion to check: lens does not turn it into an edge).
+
+**Lifetime.** The index is built in memory once per loaded graph (`nameIndexFor`). In a process that has asked a code query before (a daemon or MCP server using the name ranking), every later graph load builds it in the background (`warmNameIndex`, an unref'd timer), so the next code query finds it ready; a process that never ranks code spends nothing on it, and a one-off CLI run does not wait for it. `npm run bench` measures it as `query: graph_query code`. A sync loads a new graph, so the next query uses a new index with the renamed symbols. Sync itself does not change, apart from reading the test names of test files.
+
+**Measured** (top 3 / MRR, `evals/behaviourEval.mjs`; backlog item `backlog/bloom-tree-compresier-match.md`):
+
+| Set | 1.7.2 (terms) | 1.8.1 and 1.8.2 default (fusion) | 1.8.2 `ranking: 'learned'` |
+| :--- | :--- | :--- | :--- |
+| Kura, 50 mined commits | 26 / 0.478 | 27 / 0.496 | 29 / 0.500 |
+| Kura, 50 more (seed 2) | 25 / 0.468 | 26 / 0.486 | 29 / 0.524 |
+| graphify, 20 | 15 / 0.595 | 15 / 0.595 | 15 / 0.604 |
+| behaviour NL + EN, 7 | 3 / 0.204 | 3 / 0.261 | 4 / 0.427 |
+| behaviour NL, 8 | 5 / 0.347 | 5 / 0.358 | 5 / 0.459 |
+| Polly (C#), 50 | 8 / 0.148 | 8 / 0.152; with C# type edges 11 / 0.188 | 11 / 0.187 (with type edges) |
+| a closed C# code base on a platform, 50 (stress test) | 14 / 0.234 | 15 / 0.258; with C# type edges 18 / 0.312 | 25 / 0.387 (with type edges) |
+
+On JavaScript and Python the 1.8.2 default is the 1.8.1 ranking exactly (the same numbers on every set); C# gains from the type edges of 1.8.2.
+
+**C#: links by type.** C# imports namespaces, not files, so sync links C# files by the types they use: a file whose code names a type (`typeRefs`, PascalCase names outside comments) gets an `IMPORTS` edge to the one file that declares that type (`types`), a `TESTS` edge from a test file. A name that two or more files declare gets no edge (no guess). These edges are `INFERRED`. They feed `importedBy`, `functionView` callers and tests, impact, and the role test of the learned ranking.
+
+The weights transfer across repositories: learned on graphify alone, they lift every Kura set above the hand fusion, and learned on Kura alone they lift graphify (0.595 → 0.624). The price of every re-ranking stays: some single cases drop a place.
+
 ---
 
 ## 2. API ports: access through MCP and the npm package
@@ -117,7 +203,7 @@ The library sync API is `createGraphSync().sync({ mode: 'incremental' })`; use `
 | **Dependents** | `importedBy` | `importersOf(graph, file)` / `importedBy(args)` | Which files import the given file (fan-in analysis). |
 | **Exports** | `exports` | `exportsOf(graph, file)` / `exportsTool(args)` | Complete sorted list of exported functions, variables and types of a file. |
 | **File check** | `exists` | `fileLookup(graph, file)` / `fileExists(args)` | Checks whether a file is in the project graph; suggests matches for typos or moved folders. |
-| **Graph search** | `graph_query` | `graph_query(args)` / `rankGraphNodes(graph, query)` | Semantic and keyword search through the graph by relevance score, IDF weighting and relations. |
+| **Graph search** | `graph_query` | `graph_query(args)` / `rankGraphNodes(graph, query)` | Semantic and keyword search through the graph by relevance score, IDF weighting and relations. With `kind: 'code'` the words of names count too: see [How `graph_query` ranks code](#how-graph_query-ranks-code-terms-and-names). |
 | **Interactive search** | `searchView` | `searchView(args)` | Advanced search with regex, case sensitivity, file type filter (code, doc, test) and path globs. |
 | **Text and regex** | `grep` | `grep(args)` | Fast regex search through code, honouring `.gitignore` and project exclusions. |
 | **Config search** | `config_grep` | `grep(args)` + config filter | Searches only project and configuration files, such as `.csproj` and reference-manager XML. |

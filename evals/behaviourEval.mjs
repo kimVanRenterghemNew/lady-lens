@@ -18,6 +18,9 @@
  *   node evals/behaviourEval.mjs --lexicon <file>  the host's lexicon of today for every commit
  *   node evals/behaviourEval.mjs --cache <dir>   keep each commit's folder and database there: the next run only syncs what
  *                                                changed (a change in the facts of a file re-reads it)
+ *   node evals/behaviourEval.mjs --cache <dir> --resync   a full sync of every kept commit (after the indexer stores new metadata)
+ *   node evals/behaviourEval.mjs --ranking learned       measure the learned code ranking instead of the default fusion
+ *   node evals/behaviourEval.mjs --kind all              ask every case with kind all (code, docs and decisions together)
  */
 import fs from 'fs';
 import os from 'os';
@@ -31,6 +34,10 @@ import { runGraphEval } from '../core/eval/index.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
+// --ranking learned: graph_query's learned code ranking instead of the default fusion
+const RANKING = argv.includes('--ranking') ? argv[argv.indexOf('--ranking') + 1] : null;
+// --kind all: ask every case with this graph_query kind instead of its own (the expected files stay code files)
+const KIND = argv.includes('--kind') ? argv[argv.indexOf('--kind') + 1] : null;
 const STATE = argv.includes('--state');
 // --gold <file>: another set in the same shape (mined by evals/mineCases.mjs: evals/gold/ public, localtests/gold/ local)
 const GOLD_FILE = argv.includes('--gold') ? path.resolve(argv[argv.indexOf('--gold') + 1]) : path.join(ROOT, 'evals', STATE ? 'state-gold.json' : 'behaviour-gold.json');
@@ -62,7 +69,7 @@ const rankOf = (paths, expected) => {
 };
 
 async function ask(query, kind) {
-    const result = await graph_query({ query, kind, limit: CANDIDATES });
+    const result = await graph_query({ query, kind: KIND ?? kind, limit: CANDIDATES, ...(RANKING ? { ranking: RANKING } : {}) });
     return (result.nodes || []).map(node => node.path).filter(Boolean);
 }
 
@@ -97,7 +104,8 @@ async function evalCommit(git, commit, cases) {
     try {
         const files = fresh ? materialize(git, commit, dir) : 0;
         const started = Date.now();
-        await createGraphSync({ root: dir, repository: createGraphRepository({ databasePath: database }) }).sync({ mode: fresh ? 'full' : 'incremental' });
+        // --resync: a full sync on a kept cache, when the indexer writes new metadata (an incremental sync skips unchanged files)
+        await createGraphSync({ root: dir, repository: createGraphRepository({ databasePath: database }) }).sync({ mode: fresh || argv.includes('--resync') ? 'full' : 'incremental' });
         process.stderr.write(`  ${commit}: ${files} files, synced in ${Date.now() - started} ms\n`);
         invalidateGraphCache();
         const results = [];

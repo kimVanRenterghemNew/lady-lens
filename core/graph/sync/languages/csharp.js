@@ -11,6 +11,10 @@ export const CSHARP_CONFIG = Object.freeze({
     methodPattern: /(?:(?:public|internal|protected|private|static|virtual|override|async|abstract|sealed|partial)\s+)+([A-Za-z0-9_<>[\],.?\s]+?)\s+([A-Za-z0-9_]+)\s*\(([^)]*)\)\s*(?:where[^{]+)?\{/g,
     constructorPattern: /(?:(?:public|internal|protected|private)\s+)+([A-Za-z0-9_]+)\s*\(([^)]*)\)\s*(?::\s*(?:base|this)\([^)]*\)\s*)?\{/g,
     callPattern: /\b([A-Za-z0-9_]+)\s*\(/g,
+    // a type name used in the file: PascalCase, 3+ characters (sync links it to the file that declares that type)
+    typeRefPattern: /\b[A-Z][A-Za-z0-9_]{2,}\b/g,
+    // the file's namespace (block or file-scoped): sync uses it to pick between types of the same name
+    namespacePattern: /^\s*namespace\s+([A-Za-z0-9_.]+)/m,
     testIndicators: [/\[\s*(?:Test|Fact|TestMethod|Theory|TestCase)\b/, /\.(?:Unit)?Tests\b/i],
 
     extractPurpose(source) {

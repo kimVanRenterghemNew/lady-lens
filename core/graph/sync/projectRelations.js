@@ -2,6 +2,7 @@ import path from 'path';
 import { resolveImportPath, resolveCallee } from '../model/index.js';
 import { dependencyNodeId, fileNodeId } from '../adapters/ladybug/index.js';
 import { deriveDocumentRelations } from './documentRelations.js';
+import { visibleNamespaces, typeTargets } from './typeLinks.js';
 
 const toPosix = (value) => String(value).replace(/\\/g, '/');
 
@@ -93,11 +94,25 @@ function deriveCallRelations(file, info, lookup, now) {
     return list;
 }
 
-function deriveCodeRelations(file, info, { configPaths, has, lookup, now }) {
+/**
+ * Type references (C#: a language without file imports): a file that uses a type name links to the file that declares
+ * that type (typeLinks.js picks between several). IMPORTS, or TESTS from a test file; INFERRED: the link goes by name.
+ */
+function deriveTypeRelations(file, info, { typeDeclarers, namespaceOf }, now) {
+    const visible = visibleNamespaces(info);
+    const declarersOf = (name) => (typeDeclarers().get(name) ?? []).filter(other => other !== file);
+    const targets = new Set((info.metadata?.typeRefs ?? []).flatMap(name => typeTargets(declarersOf(name), visible, namespaceOf)));
+    const relation = importRelationKind(info.kind);
+    return [...targets].map(target => ({ from: fileNodeId(file), to: fileNodeId(target), relation, confidence: 'INFERRED', createdAt: now }));
+}
+
+function deriveCodeRelations(file, info, ctx) {
+    const { configPaths, has, lookup, now } = ctx;
     return [
         ...deriveReadRelations(file, info, configPaths, now),
         ...deriveImportRelations(file, info, has, now),
-        ...deriveCallRelations(file, info, lookup, now)
+        ...deriveCallRelations(file, info, lookup, now),
+        ...deriveTypeRelations(file, info, ctx, now)
     ];
 }
 
@@ -137,6 +152,15 @@ function buildDeclarers(files) {
     return byName;
 }
 
+/** type name -> the non-test code files that declare it as a type (metadata.types, C#) */
+function buildTypeDeclarers(files) {
+    const byType = new Map();
+    for (const [file, info] of files) {
+        if (isCodeFile(info)) (info.metadata?.types ?? []).forEach(name => appendDeclarer(byType, name, file));
+    }
+    return byType;
+}
+
 /** All project relations from the metadata of every (current) project file. Pure. */
 export function deriveProjectRelations(files, now = new Date().toISOString()) {
     const codePaths = new Set([...files.entries()].filter(([, info]) => info.type === 'CodeFile').map(([file]) => file));
@@ -154,7 +178,13 @@ export function deriveProjectRelations(files, now = new Date().toISOString()) {
         if (!byName) byName = buildDeclarers(files);
         return byName;
     };
-    const ctx = { codePaths, configPaths, docPaths, declarers, has, lookup, now };
+    let byType = null;
+    const typeDeclarers = () => {
+        if (!byType) byType = buildTypeDeclarers(files);
+        return byType;
+    };
+    const namespaceOf = (file) => files.get(file)?.metadata?.namespace;
+    const ctx = { codePaths, configPaths, docPaths, declarers, typeDeclarers, namespaceOf, has, lookup, now };
     const relations = [];
     for (const [file, info] of files) {
         const handler = TYPE_HANDLERS[info.type];

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { createGraph, functionView, definedIn } from '../core/graph/index.js';
+import { createGraph, functionView, definedIn, buildCodeEntity } from '../core/graph/index.js';
+import { deriveProjectRelations } from '../core/graph/sync/index.js';
 import {
     analyzeSourceForLanguage,
     isCodeFile,
@@ -175,6 +176,30 @@ describe('Story 23.11: Multi-language support (C#)', () => {
         expect(view.definitions[0].path).toBe('Acme.Inventory/Handlers/CheckStockForMultipleWarehousesHandler.cs');
         expect(view.callers.some(c => c.path.includes('StockController'))).toBe(true);
         expect(view.tests.some(t => t.path.includes('CheckStockTests'))).toBe(true);
+    });
+
+    it('links C# files by the types they use: IMPORTS to the file that declares a type, TESTS from a test, no guess on a shared name', () => {
+        const sources = {
+            'Inventory/RetryPolicy.cs': 'namespace Inv { public class RetryPolicy { } }',
+            'Inventory/StockService.cs': 'using Inv.C;\nnamespace Inv { public class StockService { private RetryPolicy _p; // not a Ghost\n public Shared S; public Clock C; public Order O; } }',
+            'Inventory/A/Shared.cs': 'namespace Inv.A { public class Shared { } }',
+            'Inventory/B/Shared.cs': 'namespace Inv.B { public class Shared { } }',
+            'Inventory/C/Clock.cs': 'namespace Inv.C;\npublic class Clock { }',
+            'Inventory/D/Clock.cs': 'namespace Inv.D;\npublic class Clock { }',
+            'Inventory/Order.cs': 'namespace Inv { public partial class Order { } }',
+            'Inventory/Order.Lines.cs': 'namespace Inv { public partial class Order { } }',
+            'Inventory.Tests/StockServiceTests.cs': '[Fact]\npublic void Retries_On_Timeout() { var s = new StockService(); }'
+        };
+        const files = new Map(Object.entries(sources).map(([path, source]) => [path, buildCodeEntity(path, source)]));
+        const links = deriveProjectRelations(files).filter(r => r.confidence === 'INFERRED').map(r => `${r.from} ${r.relation} ${r.to}`);
+        expect(links).toContain('file:inventory/stockservice.cs IMPORTS file:inventory/retrypolicy.cs');
+        expect(links).toContain('file:inventory.tests/stockservicetests.cs TESTS file:inventory/stockservice.cs');
+        expect(links.filter(l => l.includes('shared.cs'))).toEqual([]); // declared in two namespaces it does not see: no guess
+        expect(links).toContain('file:inventory/stockservice.cs IMPORTS file:inventory/c/clock.cs'); // `using Inv.C`
+        expect(links.filter(l => l.includes('/d/clock.cs'))).toEqual([]);
+        expect(links).toEqual(expect.arrayContaining(['file:inventory/stockservice.cs IMPORTS file:inventory/order.cs', 'file:inventory/stockservice.cs IMPORTS file:inventory/order.lines.cs'])); // one partial type
+        expect(files.get('Inventory/StockService.cs').metadata.typeRefs).not.toContain('StockService'); // its own type
+        expect(files.get('Inventory.Tests/StockServiceTests.cs').metadata.testNames).toEqual(['Retries On Timeout']);
     });
 
     it('safely handles unsupported language file as plain text without throwing', () => {

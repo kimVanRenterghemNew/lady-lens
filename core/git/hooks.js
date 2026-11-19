@@ -19,7 +19,7 @@ export const HOOK_END = '# lady-lens hook: end';
 
 export const HOOK_SCRIPT = `${HOOK_START}
 if [ "\${LENS_HOOKS:-1}" != "0" ]; then
-  (curl -s -m 1 -X POST "http://127.0.0.1:4318/sync?repo=$(pwd)" >/dev/null 2>&1 || nohup lens sync >/dev/null 2>&1 &) >/dev/null 2>&1 &
+  (curl -s --connect-timeout 5 -m 30 -X POST "http://127.0.0.1:4318/sync?repo=$(pwd)" >/dev/null 2>&1; [ $? -ne 7 ] || nohup lens sync >/dev/null 2>&1) >/dev/null 2>&1 </dev/null &
 fi
 ${HOOK_END}`;
 

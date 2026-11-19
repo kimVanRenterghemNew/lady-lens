@@ -11,3 +11,4 @@ export { findMendixProject, mendixContributor, mendixChanged, runMdlExport, star
 export { detectFunctionSmells, detectFileSmells, DESIGN_ADVICE, adviceFor } from './designSmells.js';
 export { analyzeSourceForLanguage, isLanguageSupported, configForExtension, isCodeFile, isDocFile, isConfigFile, CODE_EXTENSIONS, DOC_EXTENSIONS, CONFIG_EXTENSIONS } from './languages/index.js';
 export { commentWordsOf } from './commentWords.js';
+export { testNamesOf } from './testNames.js';

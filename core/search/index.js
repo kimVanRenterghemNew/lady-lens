@@ -13,6 +13,7 @@ import { shortNode } from '../graph/index.js';
 import { definedInTool } from './definedIn.js';
 import { importLookupTool, interfacesForScope, importedBy, imports } from './imports.js';
 import { graphFactTool, exportsTool, fileExists } from './exports.js';
+import { nameMatch } from './nameMatch.js';
 import { folderViewTool } from './folderView.js';
 import { functionViewTool, viewOf } from './functionView.js';
 import { rankDocuments } from './docMentions.js';
@@ -71,6 +72,7 @@ export {
     graphFactTool,
     exportsTool,
     fileExists,
+    nameMatch,
     folderViewTool,
     functionViewTool,
     viewOf,
@@ -118,6 +120,7 @@ export const RESEARCH_TOOLS = {
     imports: listTool('imports', args => imports(args), { lists: ['files'], narrow: 'ask about one file' }),
     exports: listTool('exports', args => exportsTool(args), { lists: ['names'], narrow: 'ask about one file' }),
     exists: withBudget(args => fileExists(args), { lists: ['similar'], narrow: 'ask about one file' }),
+    name_match: listTool('name_match', args => nameMatch(args), { lists: ['matches'], narrow: 'pass fewer files or a narrower glob, or lower limit' }),
     definedIn: listTool('definedIn', args => definedInTool(args), { lists: ['locations'], narrow: 'ask about one symbol' }),
     // callers first: they are what functionView is asked for, and the budget cuts the first list last
     functionView: listTool('functionView', args => functionViewTool(args), { lists: ['callers', 'tests', 'stories'], narrow: 'lower maxSites (lines per caller, test and story), or grep the name for every use' }),

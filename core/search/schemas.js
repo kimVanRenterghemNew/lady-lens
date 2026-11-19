@@ -63,6 +63,21 @@ export const RESEARCH_TOOL_SCHEMAS = [
         parameters: { type: 'object', properties: { file: { type: 'string', description: 'Repo-relative file path' } }, required: ['file'] }
     },
     {
+        name: 'name_match',
+        description: 'Which files fit a text by name? Matches the words and word pairs of the text ("task id" -> TASK_ID_RE) against the path, exports, symbols, purpose and calls of the files you choose (files or glob; default every code and test file), best first, each with the pairs and words it shares. E.g. the test file of a source file: text = the source path, glob = "test/**".',
+        parameters: {
+            type: 'object',
+            properties: {
+                text: { type: 'string', description: 'A sentence, a request or a path' },
+                files: { type: 'array', items: { type: 'string' }, description: 'Repo-relative paths to choose from' },
+                glob: { type: 'string', description: 'Or: a glob of the files to choose from, e.g. "test/**/*.test.js"' },
+                doc: { type: 'string', description: 'The document the text comes from (repo-relative): the files it names elsewhere come first when one is a clear match (fromDoc: true). A suggestion to check, not a link' },
+                limit: { type: 'integer', description: 'Maximum number of matches (default 10)' }
+            },
+            required: ['text']
+        }
+    },
+    {
         name: 'definedIn',
         description: 'In which file(s) is this function/name defined or exported? Complete answer from the project graph.',
         parameters: { type: 'object', properties: { symbol: { type: 'string', description: 'The exact identifier' } }, required: ['symbol'] }
@@ -121,7 +136,9 @@ export const RESEARCH_TOOL_SCHEMAS = [
             properties: {
                 sessionId: { type: 'string', description: 'Session folder under .memory' },
                 node: { type: 'string', description: 'Starting node ID for neighbor or traversal queries' },
-                kind: { type: 'string', enum: ['all', 'code', 'doc', 'test'], description: 'code = only source (no tests, no docs); doc = only the documentation (backlog, docs, README); test = only tests' },
+                kind: { type: 'string', enum: ['all', 'code', 'doc', 'test'], description: 'code = only source (no tests, no docs); with code or all the words and word pairs of names count too ("task id" ranks the file that defines TASK_ID_RE higher); doc = only the documentation (backlog, docs, README); test = only tests' },
+                names: { type: 'boolean', description: 'kind "code": false = rank on the query terms alone, without the names (default true)' },
+                ranking: { type: 'string', enum: ['fusion', 'learned'], description: 'kind "code": fusion (default) = query terms fused with the words and pairs of names; learned = a learned model over terms, names and the names of the tests that cover a file' },
                 places: { type: 'boolean', description: 'true = also `places`: in the best code files, the functions and lines that name the state or behaviour of the query ("when the queue is empty"), best first; empty with a `placesNote` when no function names enough of it' },
                 history: { type: 'boolean', description: 'true = also superseded decisions (for regressions); default only current ones' },
                 query: { type: 'string', description: 'Text to match against graph context' },

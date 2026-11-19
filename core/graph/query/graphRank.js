@@ -7,8 +7,9 @@
 import { tokenize, sharesStem } from './rankTokens.js';
 import { findTypoCorrections, computeTermWeights } from './rankCorrections.js';
 import { getNodeSearchIndex } from './searchIndex.js';
-import { graphGroundingScore } from './rankGrounding.js';
+import { pathGroundingBonus } from './rankGrounding.js';
 import { NL_EN } from '../../language/index.js';
+import { withNames } from './nameModel.js';
 
 export { tokenize } from './rankTokens.js';
 export { IDF_MIN_NODES } from './rankCorrections.js';
@@ -175,7 +176,8 @@ const rankOptions = (options) => ({ limit: 10, minScore: MIN_SCORE, ...options }
 /**
  * @param {{nodes: Map<string, object>}} graph
  * @param {string} text
- * @param {{limit?: number, minScore?: number, kind?: 'doc'}} [options]
+ * @param {{limit?: number, minScore?: number, kind?: 'doc'|'code'|'test'|'all', names?: boolean, nameModel?: object, ranking?: 'fusion'|'learned'}} [options]
+ *   names: false = without names; default the fusion of terms and names; ranking 'learned' or a nameModel = the learned model
  * @returns {Array<{node: object, score: number}>}
  */
 export function rankGraphNodes(graph, text, options) {
@@ -188,9 +190,9 @@ export function rankGraphNodes(graph, text, options) {
     const weights = termWeights(nodes, terms, wantsTests, wantsDocs);
     const wantsDecisions = terms.some(term => DECISION_WORDS.test(term));
     const wantsDiscussions = terms.some(term => /^(discussie|discussies|discussion|discussions|besproken|discussed|afgesproken|afspraak|afspraken|agreed|agreement)$/.test(term));
-    return nodes
-        .map(node => ({ node, score: scoreNode(node, terms, wantsTests, wantsDocs, weights) + nodeBonus(node, wantsDecisions, wantsDiscussions) + graphGroundingScore(node, text) }))
+    const scored = nodes.map(node => ({ node, score: scoreNode(node, terms, wantsTests, wantsDocs, weights) + nodeBonus(node, wantsDecisions, wantsDiscussions) + pathGroundingBonus(node, text) }));
+    const ranked = scored
         .filter(entry => entry.score >= opts.minScore)
-        .sort((a, b) => b.score - a.score || String(a.node.path || a.node.id).localeCompare(String(b.node.path || b.node.id)))
-        .slice(0, opts.limit);
+        .sort((a, b) => b.score - a.score || String(a.node.path || a.node.id).localeCompare(String(b.node.path || b.node.id)));
+    return withNames(graph, nodes, text, opts, ranked, scored).slice(0, opts.limit);
 }
